@@ -6,8 +6,10 @@ const logger = createLogger('Database');
 const { Pool } = pg;
 
 let pool: pg.Pool | null = null;
+let dbDisabled = false;
 
-export function getPool(): pg.Pool {
+export function getPool(): pg.Pool | null {
+  if (dbDisabled) return null;
   if (!pool) {
     pool = new Pool({
       connectionString: dbConfig.url,
@@ -16,7 +18,7 @@ export function getPool(): pg.Pool {
     });
 
     pool.on('connect', () => logger.debug('New database connection established'));
-    pool.on('error', (err) => logger.error('Unexpected pool error', { error: err.message }));
+    pool.on('error', () => {}); // silenced — testConnection handles logging
   }
   return pool;
 }
@@ -25,10 +27,11 @@ export async function query<T extends pg.QueryResultRow = any>(
   text: string,
   params?: any[]
 ): Promise<pg.QueryResult<T>> {
-  const pool = getPool();
+  const p = getPool();
+  if (!p) throw new Error('Database not available');
   const start = Date.now();
   try {
-    const result = await pool.query<T>(text, params);
+    const result = await p.query<T>(text, params);
     const duration = Date.now() - start;
     logger.debug(`Query executed in ${duration}ms`, { rows: result.rowCount });
     return result;
@@ -39,7 +42,9 @@ export async function query<T extends pg.QueryResultRow = any>(
 }
 
 export async function getClient(): Promise<pg.PoolClient> {
-  return getPool().connect();
+  const p = getPool();
+  if (!p) throw new Error('Database not available');
+  return p.connect();
 }
 
 export async function transaction<T>(
@@ -72,8 +77,9 @@ export async function testConnection(): Promise<boolean> {
     const result = await query('SELECT NOW() as time');
     logger.info(`Database connected: ${result.rows[0].time}`);
     return true;
-  } catch (error: any) {
-    logger.warn(`Database connection failed: ${error.message}`);
+  } catch {
+    logger.warn('PostgreSQL not available — running without database');
+    dbDisabled = true;
     return false;
   }
 }

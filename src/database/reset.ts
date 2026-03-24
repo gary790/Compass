@@ -7,6 +7,12 @@ async function reset() {
   logger.warn('⚠️  Resetting database — all data will be deleted!');
   const pool = getPool();
 
+  if (!pool) {
+    logger.error('Database not available — cannot reset.');
+    logger.error('Ensure DATABASE_URL is set and PostgreSQL is running.');
+    process.exit(1);
+  }
+
   try {
     await pool.query(`
       DROP TABLE IF EXISTS tool_executions CASCADE;

@@ -8,6 +8,12 @@ async function seed() {
   logger.info('Seeding database...');
   const pool = getPool();
 
+  if (!pool) {
+    logger.error('Database not available — cannot seed.');
+    logger.error('Ensure DATABASE_URL is set and PostgreSQL is running.');
+    process.exit(1);
+  }
+
   try {
     // Create default admin user
     const passwordHash = await bcrypt.hash('admin123', 10);

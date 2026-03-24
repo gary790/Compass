@@ -9,6 +9,12 @@ async function migrate() {
   logger.info('Running database migrations...');
   const pool = getPool();
 
+  if (!pool) {
+    logger.error('Database not available — cannot run migrations.');
+    logger.error('Ensure DATABASE_URL is set and PostgreSQL is running.');
+    process.exit(1);
+  }
+
   try {
     // Read migration files
     const migrationsDir = path.resolve('./migrations');

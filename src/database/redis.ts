@@ -5,21 +5,26 @@ import { createLogger } from '../utils/index.js';
 const logger = createLogger('Redis');
 
 let redis: Redis | null = null;
+let redisDisabled = false;
 
-export function getRedis(): Redis {
+export function getRedis(): Redis | null {
+  if (redisDisabled) return null;
   if (!redis) {
     redis = new Redis(redisConfig.url, {
       maxRetriesPerRequest: redisConfig.maxRetries,
       lazyConnect: true,
       retryStrategy(times) {
-        const delay = Math.min(times * 200, 5000);
-        logger.warn(`Redis reconnecting... attempt ${times}`);
-        return delay;
+        if (times >= 3) {
+          logger.warn('Redis unavailable — disabling (app will run without caching)');
+          redisDisabled = true;
+          return null; // stop retrying
+        }
+        return Math.min(times * 300, 2000);
       },
     });
 
     redis.on('connect', () => logger.info('Redis connected'));
-    redis.on('error', (err) => logger.error('Redis error', { error: err.message }));
+    redis.on('error', () => {}); // silenced — retryStrategy handles logging
   }
   return redis;
 }
@@ -27,8 +32,15 @@ export function getRedis(): Redis {
 export async function connectRedis(): Promise<boolean> {
   try {
     const r = getRedis();
-    await r.connect();
-    await r.ping();
+    if (!r) return false;
+
+    // Give Redis 3 seconds to connect; if it can't, skip it silently
+    const timeout = new Promise<never>((_, reject) =>
+      setTimeout(() => reject(new Error('timeout')), 3000)
+    );
+
+    await Promise.race([r.connect(), timeout]);
+    await Promise.race([r.ping(), timeout]);
     logger.info('Redis connection verified');
     return true;
   } catch (error: any) {
@@ -36,7 +48,13 @@ export async function connectRedis(): Promise<boolean> {
       logger.info('Redis already connected');
       return true;
     }
-    logger.warn(`Redis connection failed: ${error.message}`);
+    // Silence further connection attempts
+    redisDisabled = true;
+    if (redis) {
+      redis.disconnect(); // stop the retry loop immediately
+      redis = null;
+    }
+    logger.warn('Redis not available \u2014 running without cache/rate-limiting');
     return false;
   }
 }
@@ -54,28 +72,27 @@ export async function closeRedis(): Promise<void> {
 // ============================================================
 export async function cacheGet(key: string): Promise<string | null> {
   try {
-    return await getRedis().get(key);
+    const r = getRedis();
+    if (!r) return null;
+    return await r.get(key);
   } catch { return null; }
 }
 
 export async function cacheSet(key: string, value: string, ttlSeconds?: number): Promise<void> {
   try {
-    if (ttlSeconds) {
-      await getRedis().setex(key, ttlSeconds, value);
-    } else {
-      await getRedis().set(key, value);
-    }
-  } catch (error: any) {
-    logger.warn(`Cache set failed: ${error.message}`);
-  }
+    const r = getRedis();
+    if (!r) return;
+    if (ttlSeconds) await r.setex(key, ttlSeconds, value);
+    else await r.set(key, value);
+  } catch {}
 }
 
 export async function cacheDelete(key: string): Promise<void> {
   try {
-    await getRedis().del(key);
-  } catch (error: any) {
-    logger.warn(`Cache delete failed: ${error.message}`);
-  }
+    const r = getRedis();
+    if (!r) return;
+    await r.del(key);
+  } catch {}
 }
 
 // ============================================================
@@ -88,10 +105,10 @@ export async function checkRateLimit(
 ): Promise<{ allowed: boolean; remaining: number; resetAt: number }> {
   try {
     const r = getRedis();
+    if (!r) return { allowed: true, remaining: maxRequests, resetAt: Date.now() };
     const now = Date.now();
     const windowStart = now - windowMs;
 
-    // Use sorted set for sliding window
     const multi = r.multi();
     multi.zremrangebyscore(key, 0, windowStart);
     multi.zadd(key, now, `${now}-${Math.random()}`);
