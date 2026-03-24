@@ -25,3 +25,4 @@ docker/data/
 # ChromaDB local data
 chroma_data/
 chromadb_data/
+generate_pdf.py
