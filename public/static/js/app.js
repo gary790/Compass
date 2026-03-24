@@ -1214,10 +1214,18 @@ function switchToChatMode() {
   const chatHeader = document.getElementById('chatHeader');
   const chatMessages = document.getElementById('chatMessages');
   const chatInputArea = document.getElementById('chatInputArea');
+  const chatPane = document.getElementById('chatPane');
+  const workspacePane = document.getElementById('workspacePane');
+  const resizeHandle = document.getElementById('mainResize');
+
   if (home) home.style.display = 'none';
   if (chatHeader) chatHeader.style.display = '';
   if (chatMessages) chatMessages.style.display = '';
   if (chatInputArea) chatInputArea.style.display = '';
+  // Restore chat pane to split width, show workspace
+  if (chatPane) { chatPane.style.width = '45%'; chatPane.style.minWidth = '320px'; }
+  if (workspacePane) workspacePane.style.display = '';
+  if (resizeHandle) resizeHandle.style.display = '';
 }
 
 // Switch back to home page view
@@ -1226,10 +1234,18 @@ function switchToHomePage() {
   const chatHeader = document.getElementById('chatHeader');
   const chatMessages = document.getElementById('chatMessages');
   const chatInputArea = document.getElementById('chatInputArea');
+  const chatPane = document.getElementById('chatPane');
+  const workspacePane = document.getElementById('workspacePane');
+  const resizeHandle = document.getElementById('mainResize');
+
   if (home) home.style.display = '';
   if (chatHeader) chatHeader.style.display = 'none';
   if (chatMessages) { chatMessages.style.display = 'none'; chatMessages.innerHTML = ''; }
   if (chatInputArea) chatInputArea.style.display = 'none';
+  // Full width for home page, hide workspace
+  if (chatPane) { chatPane.style.width = '100%'; chatPane.style.minWidth = '0'; }
+  if (workspacePane) workspacePane.style.display = 'none';
+  if (resizeHandle) resizeHandle.style.display = 'none';
 }
 
 // ============================================================
