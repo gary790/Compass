@@ -13,6 +13,7 @@ let wsReconnectTimer = null;
 let wsReconnectAttempt = 0;
 let activeSidebar = null;
 let activeWorkspaceTab = 'preview';
+let conversationList = [];
 
 document.addEventListener('DOMContentLoaded', () => {
   loadWorkspaces();
@@ -21,6 +22,7 @@ document.addEventListener('DOMContentLoaded', () => {
   loadSystemInfo();
   connectWebSocket();
   setupResizeHandle();
+  loadConversationList();
   marked.setOptions({
     highlight: (code, lang) => {
       if (lang && hljs.getLanguage(lang)) return hljs.highlight(code, { language: lang }).value;
@@ -51,13 +53,17 @@ function switchSidebar(name) {
 
   activeSidebar = name;
 
-  // "chat" = new chat, no slide-out panel
+  // "chat" = toggle conversation history panel
   if (name === 'chat') {
-    panel.style.display = 'none';
-    document.getElementById('chatInput').focus();
-    currentConversationId = null;
-    document.getElementById('chatMessages').innerHTML = '';
-    addWelcomeMessage();
+    if (activeSidebar === 'chat') {
+      closeSidePanel();
+      return;
+    }
+    panel.style.display = 'flex';
+    title.textContent = 'Conversations';
+    content.innerHTML = buildConversationListPanel();
+    loadConversationList();
+    activeSidebar = 'chat';
     return;
   }
 
@@ -145,6 +151,130 @@ function buildRAGSideContent() {
       <i class="fas fa-plus mr-1"></i>Add Document
     </button>
     <div id="ragDocListSide" class="mt-3 space-y-1.5"></div>`;
+}
+
+// ============================================================
+// CONVERSATION HISTORY
+// ============================================================
+function buildConversationListPanel() {
+  return `
+    <button onclick="startNewConversation()" class="w-full px-3 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg text-xs font-medium transition mb-3">
+      <i class="fas fa-plus mr-1"></i>New Chat
+    </button>
+    <div id="convListSide" class="space-y-1">
+      <div class="text-xs text-gray-400 py-4 text-center">Loading conversations...</div>
+    </div>`;
+}
+
+function startNewConversation() {
+  currentConversationId = null;
+  document.getElementById('chatMessages').innerHTML = '';
+  addWelcomeMessage();
+  document.getElementById('chatInput').focus();
+  closeSidePanel();
+  // Highlight "chat" button
+  document.querySelectorAll('.sidebar-btn').forEach(b => b.classList.toggle('active', b.dataset.sidebar === 'chat'));
+}
+
+async function loadConversationList() {
+  try {
+    const res = await fetch('/api/chat/conversations');
+    const data = await res.json();
+    if (data.success) {
+      conversationList = data.data;
+      renderConversationList();
+    }
+  } catch {
+    const el = document.getElementById('convListSide');
+    if (el) el.innerHTML = '<div class="text-xs text-gray-400 py-4 text-center">Could not load conversations</div>';
+  }
+}
+
+function renderConversationList() {
+  const el = document.getElementById('convListSide');
+  if (!el) return;
+  if (!conversationList.length) {
+    el.innerHTML = '<div class="text-xs text-gray-400 py-4 text-center">No conversations yet</div>';
+    return;
+  }
+  el.innerHTML = conversationList.map(c => {
+    const isActive = c.id === currentConversationId;
+    const date = new Date(c.updatedAt);
+    const timeStr = formatRelativeTime(date);
+    return `
+      <div class="group flex items-center gap-2 p-2 rounded-lg cursor-pointer transition text-xs
+        ${isActive ? 'bg-indigo-50 border border-indigo-200' : 'hover:bg-gray-100 border border-transparent'}"
+        onclick="loadConversation('${c.id}')">
+        <div class="flex-1 min-w-0">
+          <div class="text-gray-700 font-medium truncate ${isActive ? 'text-indigo-700' : ''}">${escapeHtml(c.title || 'Untitled')}</div>
+          <div class="text-gray-400 truncate" style="font-size:10px">
+            ${c.messageCount || 0} msgs &middot; ${timeStr}
+          </div>
+        </div>
+        <button onclick="event.stopPropagation(); deleteConv('${c.id}')" 
+          class="opacity-0 group-hover:opacity-100 text-gray-300 hover:text-red-500 transition p-1" title="Delete">
+          <i class="fas fa-trash" style="font-size:10px"></i>
+        </button>
+      </div>`;
+  }).join('');
+}
+
+async function loadConversation(id) {
+  try {
+    const res = await fetch(`/api/chat/${id}/history`);
+    const data = await res.json();
+    if (!data.success) return;
+
+    currentConversationId = id;
+    const chatDiv = document.getElementById('chatMessages');
+    chatDiv.innerHTML = '';
+
+    // Render each message
+    const msgs = data.data.messages || [];
+    for (const msg of msgs) {
+      if (msg.role === 'user' || msg.role === 'assistant') {
+        addChatMessage(msg.role, msg.content);
+      }
+    }
+
+    // Update token counter from conversation stats
+    if (data.data.totalTokens) totalTokens = data.data.totalTokens;
+    if (data.data.totalCostUSD) totalCost = data.data.totalCostUSD;
+    updateTokenCounter();
+
+    // Re-render list to highlight active
+    renderConversationList();
+
+    // Close side panel and focus input
+    closeSidePanel();
+    document.getElementById('chatInput').focus();
+  } catch (err) {
+    console.error('Failed to load conversation:', err);
+  }
+}
+
+async function deleteConv(id) {
+  if (!confirm('Delete this conversation?')) return;
+  try {
+    await fetch(`/api/chat/${id}`, { method: 'DELETE' });
+    if (currentConversationId === id) {
+      startNewConversation();
+    }
+    loadConversationList();
+  } catch {}
+}
+
+function formatRelativeTime(date) {
+  const now = new Date();
+  const diffMs = now - date;
+  const diffMin = Math.floor(diffMs / 60000);
+  if (diffMin < 1) return 'just now';
+  if (diffMin < 60) return diffMin + 'm ago';
+  const diffHr = Math.floor(diffMin / 60);
+  if (diffHr < 24) return diffHr + 'h ago';
+  const diffDay = Math.floor(diffHr / 24);
+  if (diffDay < 7) return diffDay + 'd ago';
+  return date.toLocaleDateString();
 }
 
 function buildWorkflowsPanel() {
@@ -395,6 +525,8 @@ async function sendMessage() {
 
   isStreaming = false; updateSendButton(false);
   refreshFileTree();
+  // Refresh conversation list after each message (updates title, timestamps)
+  loadConversationList();
 }
 
 function sendQuickAction(msg) {
