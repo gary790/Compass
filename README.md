@@ -1,6 +1,6 @@
-# Agentic RAG Platform v1.8.0
+# Agentic RAG Platform v1.9.0
 
-A self-hosted, production-ready AI development platform featuring Mixture-of-Experts (MoE) LLM routing, Hybrid RAG with Reciprocal Rank Fusion, 60 tools across 10 categories, GenUI streaming dashboard, WebSocket real-time events, graph-based agent orchestration, Project Memory Hub, Docker sandbox isolation, comprehensive performance metrics, live terminal, and full Git/GitHub integration.
+A self-hosted, production-ready AI development platform featuring Mixture-of-Experts (MoE) LLM routing, Hybrid RAG with LLM-powered query expansion and cross-encoder reranking, 60 tools across 10 categories, GenUI streaming dashboard, WebSocket real-time events, graph-based agent orchestration, Project Memory Hub, Docker sandbox isolation, comprehensive performance metrics with live PostgreSQL/Redis/ChromaDB service monitoring, E2E test suite, responsive mobile UI, and full Git/GitHub integration.
 
 ## Architecture
 
@@ -73,8 +73,11 @@ A self-hosted, production-ready AI development platform featuring Mixture-of-Exp
 
 ### Hybrid RAG Pipeline
 - **BM25 + Vector Search** — Reciprocal Rank Fusion combining keyword and semantic results
+- **LLM Query Expansion** — GPT-4o-mini generates 3+ alternative query phrasings for broader retrieval
+- **Cross-Encoder Reranking** — LLM-based relevance scoring reranks top 20 candidates for precision
 - **ChromaDB Integration** — Persistent vector embeddings with 3 collections (docs, code, memory)
 - **Semantic Chunking** — Intelligent document splitting with overlap
+- **Contextual Compression** — Trims irrelevant parts of results based on query overlap
 - **Source Cards UI** — GenUI component showing retrieval sources with scores
 
 ### Project Memory Hub
@@ -174,8 +177,8 @@ A self-hosted, production-ready AI development platform featuring Mixture-of-Exp
 - **Framework**: Hono (fast, lightweight)
 - **LLM SDKs**: OpenAI, Anthropic, Google Generative AI
 - **Vector DB**: ChromaDB
-- **Database**: PostgreSQL 16 (optional)
-- **Cache**: Redis 7 (optional)
+- **Database**: PostgreSQL 15 (connected and migrated)
+- **Cache**: Redis 7 (connected for caching and rate-limiting)
 - **Frontend**: Tailwind CSS, Chart.js, Highlight.js, Marked.js
 - **Process Manager**: PM2
 - **Container**: Docker (optional, for sandbox)
@@ -199,6 +202,7 @@ docker-compose up -d
 
 | Version | Feature |
 |---------|---------|
+| v1.9.0 | Maximum Performance: PostgreSQL/Redis/ChromaDB connected, LLM query expansion, cross-encoder reranking, E2E test suite (31/31), mobile responsive UI, service health monitoring |
 | v1.8.0 | Full Performance: comprehensive metrics, live terminal, deploy/github panels, performance tracker |
 | v1.7.0 | Sandbox Isolation: Docker containers per workspace, resource monitoring |
 | v1.6.0 | Project Memory Hub: persistent context, embeddings, decision log |

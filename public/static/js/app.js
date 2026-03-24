@@ -1,5 +1,5 @@
 // ============================================================
-// AGENTIC RAG PLATFORM — Frontend v1.8 (Full Performance)
+// AGENTIC RAG PLATFORM — Frontend v1.9 (Maximum Performance)
 // Layout: Narrow sidebar | Chat pane | Workspace pane
 // ============================================================
 
@@ -836,6 +836,8 @@ async function loadMetrics() {
         { label: 'Memory', value: d.memory.used + ' (' + d.memory.heapUsedPercent + '%)', color: 'text-yellow-600' },
         { label: 'Uptime', value: Math.floor(d.uptime / 60) + ' min', color: 'text-gray-700' },
         { label: 'Database', value: d.database, color: d.database === 'connected' ? 'text-green-600' : 'text-red-500' },
+        { label: 'Redis', value: d.redis || 'unknown', color: (d.redis === 'connected') ? 'text-green-600' : 'text-red-500' },
+        { label: 'ChromaDB', value: d.chromadb || 'unknown', color: (d.chromadb === 'connected') ? 'text-green-600' : 'text-red-500' },
         { label: 'WS Clients', value: d.websocket.connectedClients, color: 'text-indigo-600' },
         { label: 'P95 Latency', value: (perf.p95LatencyMs || 0) + 'ms', color: 'text-orange-600' },
       ].map(function(m) {
@@ -1792,8 +1794,10 @@ async function loadSystemInfo() {
       document.getElementById('systemInfo').innerHTML = `
         <div class="space-y-1.5">
           <div>Status: <span class="text-green-600 font-semibold">${d.status}</span></div>
-          <div>Version: <span class="text-indigo-600">${d.version || '1.8.0'}</span></div>
+          <div>Version: <span class="text-indigo-600">${d.version || '1.9.0'}</span></div>
           <div>Database: <span class="${d.database==='connected'?'text-green-600':'text-red-500'}">${d.database}</span></div>
+          <div>Redis: <span class="${(d.redis||'')=='connected'?'text-green-600':'text-red-500'}">${d.redis||'unknown'}</span></div>
+          <div>ChromaDB: <span class="${(d.chromadb||'')=='connected'?'text-green-600':'text-red-500'}">${d.chromadb||'unknown'}</span></div>
           <div>LLM Providers: <span class="text-indigo-600">${d.llmProviders.join(', ')}</span></div>
           <div>Tools: <span class="text-indigo-600">${d.toolCount}</span></div>
           <div>Memory: ${d.memory.used} / ${d.memory.total}</div>

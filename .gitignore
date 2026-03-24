@@ -24,3 +24,4 @@ docker/data/
 .pm2/
 # ChromaDB local data
 chroma_data/
+chromadb_data/

@@ -3,7 +3,7 @@ import { cors } from 'hono/cors';
 import { logger as honoLogger } from 'hono/logger';
 import { serve } from '@hono/node-server';
 import { serveStatic } from '@hono/node-server/serve-static';
-import { serverConfig } from './config/index.js';
+import { serverConfig, chromaConfig } from './config/index.js';
 import { createLogger, performanceTracker } from './utils/index.js';
 import { initializeTools } from './tools/index.js';
 import { testConnection } from './database/client.js';
@@ -79,7 +79,7 @@ app.route('/api/sandbox', sandboxRoutes);
 app.get('/api/health', (c) => {
   return c.json({
     status: 'ok',
-    version: '1.8.0',
+    version: '1.9.0',
     sandbox: {
       dockerAvailable: sandboxManager.isDockerAvailable(),
       runningContainers: sandboxManager.getRunningCount(),
@@ -139,14 +139,14 @@ app.get('*', async (c) => {
 // ============================================================
 async function startup() {
   console.log('');
-  console.log('  Agentic RAG Platform v1.8.0 — Full Performance');
+  console.log('  Agentic RAG Platform v1.9.0 — Maximum Performance');
   console.log('  Starting up...');
   console.log('');
 
   logger.info('╔══════════════════════════════════════╗');
-  logger.info('║   Agentic RAG Platform v1.8.0       ║');
+  logger.info('║   Agentic RAG Platform v1.9.0       ║');
   logger.info('║   MoE · Hybrid RAG · 60 Tools        ║');
-  logger.info('║   Full Performance · Metrics          ║');
+  logger.info('║   Full Stack · 100% Connected         ║');
   logger.info('╚══════════════════════════════════════╝');
   logger.info('');
 
@@ -177,6 +177,18 @@ async function startup() {
   const redisConnected = await connectRedis();
   if (!redisConnected) {
     logger.warn('⚠ Redis not connected — caching and rate limiting disabled');
+  }
+
+  // Test ChromaDB connection (non-blocking — app works without it)
+  try {
+    const chromaRes = await fetch(`${chromaConfig.url}/api/v2/heartbeat`, { signal: AbortSignal.timeout(3000) });
+    if (chromaRes.ok) {
+      logger.info('✅ ChromaDB connected (vector store ready)');
+    } else {
+      logger.warn('⚠ ChromaDB returned non-OK — vector search may be limited');
+    }
+  } catch {
+    logger.warn('⚠ ChromaDB not available — vector search disabled');
   }
 
   // Ensure workspace directory
@@ -229,7 +241,7 @@ function generateFallbackHTML(): string {
 .card{background:#16213e;padding:40px;border-radius:12px;text-align:center;max-width:500px}
 h1{color:#e94560}a{color:#74b9ff}</style></head>
 <body><div class="card">
-<h1>Agentic RAG Platform v1.8.0</h1>
+<h1>Agentic RAG Platform v1.9.0</h1>
 <p>The dashboard will appear once the frontend is loaded.</p>
 <p>API: <a href="/api/health">/api/health</a></p>
 <p>Status: <a href="/api/system/status">/api/system/status</a></p>

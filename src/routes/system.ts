@@ -1,13 +1,14 @@
 import { Hono } from 'hono';
-import { getAvailableProviders, MODEL_REGISTRY, getModelsForProvider, MOE_ROUTING, llmApiKeys, serverConfig } from '../config/index.js';
+import { getAvailableProviders, MODEL_REGISTRY, getModelsForProvider, MOE_ROUTING, llmApiKeys, serverConfig, chromaConfig } from '../config/index.js';
 import { toolRegistry } from '../tools/index.js';
 import { costTracker, performanceTracker } from '../utils/index.js';
 import { testConnection } from '../database/client.js';
+import { getRedis } from '../database/redis.js';
 import { getProviderHealth } from '../llm/router.js';
 import { getConnectedClients, getPendingApprovalCount } from './websocket.js';
 import { execSync } from 'child_process';
 
-const PLATFORM_VERSION = '1.8.0';
+const PLATFORM_VERSION = '1.9.0';
 const systemRoutes = new Hono();
 
 // Request timing middleware for system routes
@@ -28,6 +29,20 @@ systemRoutes.get('/status', async (c) => {
   const tools = toolRegistry.getAll();
   const categories = [...new Set(tools.map(t => t.category))];
 
+  // Check Redis status
+  let redisStatus = 'disconnected';
+  try {
+    const redis = getRedis();
+    if (redis && redis.status === 'ready') redisStatus = 'connected';
+  } catch {}
+
+  // Check ChromaDB status
+  let chromaStatus = 'disconnected';
+  try {
+    const res = await fetch(`${chromaConfig.url}/api/v2/heartbeat`, { signal: AbortSignal.timeout(2000) });
+    if (res.ok) chromaStatus = 'connected';
+  } catch {}
+
   return c.json({
     success: true,
     data: {
@@ -36,6 +51,8 @@ systemRoutes.get('/status', async (c) => {
       uptime: process.uptime(),
       startedAt: new Date(Date.now() - process.uptime() * 1000).toISOString(),
       database: dbConnected ? 'connected' : 'disconnected',
+      redis: redisStatus,
+      chromadb: chromaStatus,
       llmProviders: providers,
       toolCount: tools.length,
       toolCategories: categories,

@@ -1,5 +1,5 @@
 import { RAGDocument, RAGChunk, RAGSearchResult, RAGSearchRequest, RAGIngestRequest } from '../types/index.js';
-import { createEmbedding } from '../llm/router.js';
+import { createEmbedding, callLLM } from '../llm/router.js';
 import { query as dbQuery } from '../database/client.js';
 import { ragConfig, defaultLLMConfig, chromaConfig } from '../config/index.js';
 import { createLogger, generateId, estimateTokens } from '../utils/index.js';
@@ -122,19 +122,55 @@ async function getChromaCollection(collectionName?: string) {
 }
 
 // ============================================================
-// QUERY EXPANSION — Generate synonyms/alternative queries
+// QUERY EXPANSION — LLM-powered multi-query generation
 // ============================================================
-function expandQuery(query: string): string[] {
-  // Simple keyword-based expansion (LLM-based expansion can be added later)
+async function expandQueryLLM(query: string): Promise<string[]> {
   const queries = [query];
 
-  // Remove stop words and generate a keyword-only version
+  // Always add keyword-only version
   const stopWords = new Set(['the', 'a', 'an', 'is', 'are', 'was', 'were', 'what', 'how', 'why', 'when', 'where', 'which', 'who', 'do', 'does', 'did', 'can', 'could', 'should', 'would', 'will', 'shall', 'may', 'might', 'to', 'of', 'in', 'for', 'on', 'with', 'at', 'by', 'from', 'as', 'into', 'about', 'or', 'and', 'but', 'not', 'it', 'this', 'that', 'these', 'those', 'i', 'me', 'my', 'we', 'our', 'you', 'your', 'he', 'she', 'they', 'them', 'his', 'her', 'their']);
   const keywords = query.toLowerCase().split(/\s+/).filter(w => !stopWords.has(w) && w.length > 2);
   if (keywords.length > 1 && keywords.join(' ') !== query.toLowerCase().trim()) {
     queries.push(keywords.join(' '));
   }
 
+  // LLM-powered expansion: generate alternative phrasings
+  try {
+    const expansionResponse = await callLLM({
+      provider: defaultLLMConfig.provider,
+      model: 'gpt-4o-mini', // Use fast cheap model for expansion
+      messages: [
+        { role: 'system', content: 'You are a search query expansion expert. Given a user query, generate 3 alternative phrasings that would help retrieve relevant documents. Return ONLY a JSON array of strings, no explanation.' },
+        { role: 'user', content: `Expand this search query into 3 alternative phrasings:\n"${query}"\nReturn JSON array only.` },
+      ],
+      temperature: 0.7,
+      maxTokens: 200,
+      responseFormat: 'json',
+    });
+
+    const parsed = JSON.parse(expansionResponse.content);
+    const alternatives = Array.isArray(parsed) ? parsed : (parsed.queries || parsed.alternatives || []);
+    for (const alt of alternatives) {
+      if (typeof alt === 'string' && alt.trim() && alt.trim() !== query) {
+        queries.push(alt.trim());
+      }
+    }
+    logger.info(`LLM query expansion: ${query} -> ${queries.length} variants`);
+  } catch (error: any) {
+    logger.debug(`LLM expansion skipped: ${error.message}`);
+  }
+
+  return queries;
+}
+
+// Simple fallback (used when LLM is unavailable)
+function expandQuerySimple(query: string): string[] {
+  const queries = [query];
+  const stopWords = new Set(['the', 'a', 'an', 'is', 'are', 'was', 'were', 'what', 'how', 'why', 'when', 'where', 'which', 'who', 'do', 'does', 'did', 'can', 'could', 'should', 'would', 'will', 'shall', 'may', 'might', 'to', 'of', 'in', 'for', 'on', 'with', 'at', 'by', 'from', 'as', 'into', 'about', 'or', 'and', 'but', 'not', 'it', 'this', 'that', 'these', 'those', 'i', 'me', 'my', 'we', 'our', 'you', 'your', 'he', 'she', 'they', 'them', 'his', 'her', 'their']);
+  const keywords = query.toLowerCase().split(/\s+/).filter(w => !stopWords.has(w) && w.length > 2);
+  if (keywords.length > 1 && keywords.join(' ') !== query.toLowerCase().trim()) {
+    queries.push(keywords.join(' '));
+  }
   return queries;
 }
 
@@ -183,6 +219,63 @@ function compressResult(result: RAGSearchResult, query: string): RAGSearchResult
     ...result,
     chunk: { ...result.chunk, content: compressed },
   };
+}
+
+// ============================================================
+// CROSS-ENCODER RERANKING — LLM-based relevance scoring
+// ============================================================
+async function crossEncoderRerank(results: RAGSearchResult[], query: string, topK: number): Promise<RAGSearchResult[]> {
+  if (results.length <= topK) return results;
+
+  // Take top candidates for reranking (max 20 to limit cost)
+  const candidates = results.slice(0, Math.min(results.length, 20));
+
+  try {
+    const passages = candidates.map((r, i) => 
+      `[${i}] ${r.chunk.content.substring(0, 300)}`
+    ).join('\n\n');
+
+    const response = await callLLM({
+      provider: defaultLLMConfig.provider,
+      model: 'gpt-4o-mini',
+      messages: [
+        { role: 'system', content: 'You are a relevance judge. Given a query and numbered passages, rank the passages by relevance to the query. Return ONLY a JSON array of passage indices sorted from most to least relevant. Example: [3, 0, 7, 1]' },
+        { role: 'user', content: `Query: "${query}"\n\nPassages:\n${passages}\n\nReturn JSON array of indices sorted by relevance (most relevant first):` },
+      ],
+      temperature: 0,
+      maxTokens: 200,
+      responseFormat: 'json',
+    });
+
+    const ranked = JSON.parse(response.content);
+    const indices = Array.isArray(ranked) ? ranked : (ranked.indices || ranked.ranking || []);
+    
+    const reranked: RAGSearchResult[] = [];
+    const seen = new Set<number>();
+    for (const idx of indices) {
+      const i = typeof idx === 'number' ? idx : parseInt(idx);
+      if (!isNaN(i) && i >= 0 && i < candidates.length && !seen.has(i)) {
+        seen.add(i);
+        reranked.push({ ...candidates[i], score: 1 - (reranked.length / candidates.length) });
+      }
+      if (reranked.length >= topK) break;
+    }
+
+    // Fill remaining slots with unranked results
+    if (reranked.length < topK) {
+      for (let i = 0; i < candidates.length && reranked.length < topK; i++) {
+        if (!seen.has(i)) {
+          reranked.push(candidates[i]);
+        }
+      }
+    }
+
+    logger.info(`Cross-encoder reranked ${candidates.length} candidates -> top ${reranked.length}`);
+    return reranked;
+  } catch (error: any) {
+    logger.debug(`Cross-encoder reranking skipped: ${error.message}`);
+    return results.slice(0, topK);
+  }
 }
 
 // ============================================================
@@ -407,8 +500,13 @@ export async function searchRAG(req: RAGSearchRequest): Promise<RAGSearchResult[
 
   logger.info(`RAG search: "${req.query}" (type: ${searchType}, topK: ${topK})`);
 
-  // Query expansion
-  const expandedQueries = expandQuery(req.query);
+  // Query expansion (LLM-powered with fallback)
+  let expandedQueries: string[];
+  try {
+    expandedQueries = await expandQueryLLM(req.query);
+  } catch {
+    expandedQueries = expandQuerySimple(req.query);
+  }
   logger.info(`Query expanded into ${expandedQueries.length} variants`);
 
   let results: RAGSearchResult[];
@@ -458,8 +556,15 @@ export async function searchRAG(req: RAGSearchRequest): Promise<RAGSearchResult[
     }
   }
 
+  // Cross-encoder reranking using LLM relevance scoring
+  if (ragConfig.enableReranking && results.length > topK) {
+    results = await crossEncoderRerank(results, req.query, topK);
+  } else {
+    results = results.slice(0, topK);
+  }
+
   // Contextual compression
-  results = results.slice(0, topK).map(r => compressResult(r, req.query));
+  results = results.map(r => compressResult(r, req.query));
 
   logger.info(`Returning ${results.length} results`);
   return results;
