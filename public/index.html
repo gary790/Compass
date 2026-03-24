@@ -296,46 +296,46 @@
           </button>
         </div>
 
-        <!-- Service icons row -->
+        <!-- Service icons row — each opens its own AI agent page -->
         <div class="flex items-start gap-5 flex-wrap justify-center max-w-2xl">
-          <div class="service-icon-item" onclick="sendQuickAction('Create a presentation slide deck')">
+          <div class="service-icon-item" onclick="navigateToAgent('ai-slides')">
             <div class="service-icon-circle" style="background:#ecfdf5;"><i class="fas fa-file-powerpoint" style="color:#10b981;"></i></div>
             <span class="service-icon-label">AI Slides</span>
           </div>
-          <div class="service-icon-item" onclick="sendQuickAction('Create a spreadsheet')">
+          <div class="service-icon-item" onclick="navigateToAgent('ai-sheets')">
             <div class="service-icon-circle" style="background:#f0fdf4;"><i class="fas fa-table" style="color:#22c55e;"></i></div>
             <span class="service-icon-label">AI Sheets</span>
           </div>
-          <div class="service-icon-item" onclick="sendQuickAction('Create a document')">
+          <div class="service-icon-item" onclick="navigateToAgent('ai-docs')">
             <div class="service-icon-circle" style="background:#eff6ff;"><i class="fas fa-file-alt" style="color:#3b82f6;"></i></div>
             <span class="service-icon-label">AI Docs</span>
           </div>
-          <div class="service-icon-item" onclick="sendQuickAction('Help me design a UI layout')">
+          <div class="service-icon-item" onclick="navigateToAgent('ai-designer')">
             <div class="service-icon-circle" style="background:#fdf4ff;"><i class="fas fa-pen-ruler" style="color:#a855f7;"></i></div>
             <span class="service-icon-label">AI Designer</span>
           </div>
-          <div class="service-icon-item" onclick="sendQuickAction('Start a new chat conversation')" style="position:relative;">
+          <div class="service-icon-item" onclick="switchToChatMode(); sendQuickAction('Start a new chat conversation')" style="position:relative;">
             <div class="service-icon-circle" style="background:#eef2ff;"><i class="fas fa-comment-dots" style="color:#6366f1;"></i></div>
             <div style="position:absolute;top:0;right:14px;width:8px;height:8px;background:#3b82f6;border-radius:50%;border:2px solid #fff;"></div>
             <span class="service-icon-label">AI Chat</span>
           </div>
-          <div class="service-icon-item" onclick="sendQuickAction('Generate an image')">
+          <div class="service-icon-item" onclick="navigateToAgent('ai-image')">
             <div class="service-icon-circle" style="background:#fff7ed;"><i class="fas fa-image" style="color:#f97316;"></i></div>
             <span class="service-icon-label">AI Image</span>
           </div>
-          <div class="service-icon-item" onclick="sendQuickAction('Generate music or audio')">
+          <div class="service-icon-item" onclick="navigateToAgent('ai-music')">
             <div class="service-icon-circle" style="background:#fef2f2;"><i class="fas fa-music" style="color:#ef4444;"></i></div>
             <span class="service-icon-label">AI Music</span>
           </div>
-          <div class="service-icon-item" onclick="sendQuickAction('Generate a video')">
+          <div class="service-icon-item" onclick="navigateToAgent('ai-video')">
             <div class="service-icon-circle" style="background:#ecfdf5;"><i class="fas fa-video" style="color:#14b8a6;"></i></div>
             <span class="service-icon-label">AI Video</span>
           </div>
-          <div class="service-icon-item" onclick="sendQuickAction('Summarize meeting notes')">
+          <div class="service-icon-item" onclick="navigateToAgent('ai-meeting-notes')">
             <div class="service-icon-circle" style="background:#ecfdf5;"><i class="fas fa-clipboard-list" style="color:#0ea5e9;"></i></div>
             <span class="service-icon-label">AI Meeting<br>Notes</span>
           </div>
-          <div class="service-icon-item" onclick="sendQuickAction('Show available AI agents and their capabilities')">
+          <div class="service-icon-item" onclick="navigateToAgent('ai-agents')">
             <div class="service-icon-circle" style="background:#f5f5f5;"><i class="fas fa-star-of-life" style="color:#9ca3af;"></i></div>
             <span class="service-icon-label">All Agents</span>
           </div>

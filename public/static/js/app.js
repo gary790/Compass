@@ -1208,6 +1208,14 @@ function sendQuickAction(msg) {
   sendMessage();
 }
 
+// ============================================================
+// AGENT PAGE NAVIGATION
+// ============================================================
+// Navigate to a dedicated AI agent page (opens in the platform browser)
+function navigateToAgent(agentId) {
+  window.location.href = '/' + agentId;
+}
+
 // Switch from home page view to active chat view
 function switchToChatMode() {
   const home = document.getElementById('homePage');

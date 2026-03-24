@@ -120,6 +120,32 @@ app.get('/', async (c) => {
   }
 });
 
+// ============================================================
+// AI AGENT PAGES — Each service icon has its own full-page agent
+// ============================================================
+const agentPages: Record<string, string> = {
+  '/ai-slides': 'public/ai-slides.html',
+  '/ai-sheets': 'public/ai-slides.html',   // Placeholder — will get own page
+  '/ai-docs': 'public/ai-slides.html',     // Placeholder
+  '/ai-designer': 'public/ai-slides.html', // Placeholder
+  '/ai-image': 'public/ai-slides.html',    // Placeholder
+  '/ai-music': 'public/ai-slides.html',    // Placeholder
+  '/ai-video': 'public/ai-slides.html',    // Placeholder
+  '/ai-meeting-notes': 'public/ai-slides.html', // Placeholder
+  '/ai-agents': 'public/ai-slides.html',   // Placeholder
+};
+
+for (const [route, file] of Object.entries(agentPages)) {
+  app.get(route, async (c) => {
+    try {
+      const html = await fs.readFile(path.resolve(file), 'utf-8');
+      return c.html(html);
+    } catch {
+      return c.notFound();
+    }
+  });
+}
+
 // Catch-all for SPA routing (but NOT for /api/* or /ws)
 app.get('*', async (c) => {
   const url = new URL(c.req.url);
