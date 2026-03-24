@@ -304,6 +304,8 @@ export interface GenUIApprovalData {
   toolArgs: Record<string, any>;
   actions: ('approve' | 'reject' | 'edit')[];
   riskLevel: ToolDefinition['riskLevel'];
+  description?: string;
+  category?: string;
 }
 
 export interface GenUIErrorData {

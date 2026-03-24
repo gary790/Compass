@@ -457,6 +457,12 @@ function scheduleReconnect() {
 function handleWebSocketMessage(msg) {
   if (msg.type === 'system_event' && msg.payload?.event === 'connected')
     console.log('[WS] Ack:', msg.payload.clientId);
+
+  // Handle agent events relayed over WebSocket (for multi-client sync)
+  if (msg.type === 'agent_event' && msg.payload?.type === 'approval') {
+    // Another client might show the approval — optional for future multi-user
+    console.log('[WS] Approval event relayed:', msg.payload.data?.id);
+  }
 }
 
 function updateConnectionStatus(status) {
@@ -474,6 +480,133 @@ function updateConnectionStatus(status) {
 function sendWSMessage(type, payload) {
   if (ws?.readyState === WebSocket.OPEN)
     ws.send(JSON.stringify({ type, id: Date.now().toString(36), payload }));
+}
+
+// ============================================================
+// APPROVAL CARD — Interactive approve/reject UI
+// ============================================================
+function showApprovalCard(div, data) {
+  const approvalId = data.id;
+  const toolName = data.toolName || 'Unknown Tool';
+  const toolArgs = data.toolArgs || {};
+  const riskLevel = data.riskLevel || 'medium';
+  const description = data.description || '';
+  const category = data.category || '';
+
+  const riskColors = {
+    low: { bg: 'bg-blue-50', border: 'border-blue-200', badge: 'bg-blue-100 text-blue-700', icon: 'text-blue-500' },
+    medium: { bg: 'bg-yellow-50', border: 'border-yellow-200', badge: 'bg-yellow-100 text-yellow-700', icon: 'text-yellow-500' },
+    high: { bg: 'bg-orange-50', border: 'border-orange-200', badge: 'bg-orange-100 text-orange-700', icon: 'text-orange-500' },
+    critical: { bg: 'bg-red-50', border: 'border-red-200', badge: 'bg-red-100 text-red-700', icon: 'text-red-500' },
+  };
+  const rc = riskColors[riskLevel] || riskColors.medium;
+
+  // Format tool arguments for display
+  const argsEntries = Object.entries(toolArgs);
+  const argsHtml = argsEntries.length > 0
+    ? `<div class="mt-2 bg-white bg-opacity-60 rounded p-2 font-mono text-xs space-y-0.5">
+        ${argsEntries.map(([k, v]) => {
+          const val = typeof v === 'string' ? v : JSON.stringify(v);
+          const truncated = val.length > 120 ? val.substring(0, 120) + '...' : val;
+          return `<div><span class="text-gray-400">${escapeHtml(k)}:</span> <span class="text-gray-700">${escapeHtml(truncated)}</span></div>`;
+        }).join('')}
+      </div>`
+    : '';
+
+  const cardId = `approval-${approvalId}`;
+  const cardHtml = `
+    <div id="${cardId}" class="mt-3 ${rc.bg} ${rc.border} border rounded-lg overflow-hidden approval-card" data-approval-id="${approvalId}">
+      <div class="px-3 py-2 flex items-center justify-between border-b ${rc.border}">
+        <div class="flex items-center gap-2">
+          <i class="fas fa-shield-alt ${rc.icon}"></i>
+          <span class="font-semibold text-sm text-gray-800">Approval Required</span>
+          <span class="px-1.5 py-0.5 rounded text-xs font-medium ${rc.badge}">${riskLevel.toUpperCase()}</span>
+          ${category ? `<span class="text-xs text-gray-400">${escapeHtml(category)}</span>` : ''}
+        </div>
+        <div class="flex items-center gap-1 text-xs text-gray-400">
+          <i class="fas fa-clock"></i>
+          <span id="${cardId}-timer">60s</span>
+        </div>
+      </div>
+      <div class="px-3 py-2">
+        <div class="text-sm text-gray-700">
+          <span class="font-semibold text-indigo-600">${escapeHtml(toolName)}</span>
+          ${description ? `<span class="text-gray-500 ml-1">— ${escapeHtml(description)}</span>` : ''}
+        </div>
+        ${argsHtml}
+      </div>
+      <div id="${cardId}-actions" class="px-3 py-2 border-t ${rc.border} flex items-center gap-2">
+        <button onclick="handleApproval('${approvalId}', true)" class="px-3 py-1.5 bg-green-500 hover:bg-green-600 text-white rounded-lg text-xs font-medium transition flex items-center gap-1">
+          <i class="fas fa-check"></i> Approve
+        </button>
+        <button onclick="handleApproval('${approvalId}', false)" class="px-3 py-1.5 bg-red-500 hover:bg-red-600 text-white rounded-lg text-xs font-medium transition flex items-center gap-1">
+          <i class="fas fa-times"></i> Reject
+        </button>
+        <div class="flex-1"></div>
+        <span class="text-xs text-gray-400">Auto-approves on timeout</span>
+      </div>
+    </div>
+  `;
+  div.innerHTML += cardHtml;
+
+  // Countdown timer
+  let remaining = 60;
+  const timerEl = document.getElementById(`${cardId}-timer`);
+  const countdown = setInterval(() => {
+    remaining--;
+    if (timerEl) timerEl.textContent = `${remaining}s`;
+    if (remaining <= 0) {
+      clearInterval(countdown);
+      resolveApprovalCard(approvalId, true, 'timeout');
+    }
+  }, 1000);
+
+  // Store the interval so we can clear it on manual action
+  const card = document.getElementById(cardId);
+  if (card) card._countdownInterval = countdown;
+
+  // Scroll into view
+  document.getElementById('chatMessages').scrollTop = document.getElementById('chatMessages').scrollHeight;
+}
+
+function handleApproval(approvalId, approved) {
+  // Send approval response via WebSocket
+  sendWSMessage('approval_response', {
+    approvalId: approvalId,
+    approved: approved,
+  });
+
+  resolveApprovalCard(approvalId, approved, 'user');
+}
+
+function resolveApprovalCard(approvalId, approved, source) {
+  const cardId = `approval-${approvalId}`;
+  const card = document.getElementById(cardId);
+  if (!card) return;
+
+  // Clear countdown
+  if (card._countdownInterval) clearInterval(card._countdownInterval);
+
+  // Update the actions area with the result
+  const actionsEl = document.getElementById(`${cardId}-actions`);
+  if (actionsEl) {
+    const sourceLabel = source === 'timeout' ? '(auto-approved on timeout)' : '';
+    if (approved) {
+      actionsEl.innerHTML = `<div class="flex items-center gap-2 text-green-600 text-xs font-medium">
+        <i class="fas fa-check-circle"></i> Approved ${sourceLabel}
+      </div>`;
+      card.className = card.className.replace(/bg-\w+-50/, 'bg-green-50').replace(/border-\w+-200/g, 'border-green-200');
+    } else {
+      actionsEl.innerHTML = `<div class="flex items-center gap-2 text-red-600 text-xs font-medium">
+        <i class="fas fa-times-circle"></i> Rejected
+      </div>`;
+      card.className = card.className.replace(/bg-\w+-50/, 'bg-red-50').replace(/border-\w+-200/g, 'border-red-200');
+    }
+  }
+
+  // Update timer
+  const timerEl = document.getElementById(`${cardId}-timer`);
+  if (timerEl) timerEl.textContent = approved ? '✓' : '✗';
 }
 
 setInterval(() => { sendWSMessage('ping', { timestamp: Date.now() }); }, 30000);
@@ -584,7 +717,10 @@ function handleSSEEvent(event, contentDiv, tracePanel) {
       }
       break;
     case 'approval':
-      addTraceItem(tracePanel, event.data.message, 'fas fa-shield-alt', 'text-orange-500');
+      addTraceItem(tracePanel,
+        `<span class="text-orange-600 font-semibold">Approval Required:</span> ${event.data.toolName} <span class="text-gray-400">[${event.data.riskLevel || 'medium'}]</span>`,
+        'fas fa-shield-alt', 'text-orange-500');
+      showApprovalCard(contentDiv, event.data);
       break;
     case 'error':
       addTraceItem(tracePanel, event.data.message, 'fas fa-exclamation-triangle', 'text-red-500');

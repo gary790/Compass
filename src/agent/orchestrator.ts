@@ -5,6 +5,7 @@ import {
 } from '../types/index.js';
 import { callLLM, streamLLM } from '../llm/router.js';
 import { RepairEngine, DetectedError } from './repair.js';
+import { requestApproval } from '../routes/websocket.js';
 import { toolRegistry } from '../tools/index.js';
 import { getBestModelForTask, agentConfig } from '../config/index.js';
 import { createLogger, generateId, withTimeout, costTracker } from '../utils/index.js';
@@ -428,18 +429,46 @@ export class Orchestrator {
     // Check approval requirement
     const toolDef = toolRegistry.get(toolName);
     if (toolDef?.definition.requiresApproval && agentConfig.enableHumanBreakpoints) {
+      const approvalId = generateId('approval');
+
+      // Emit approval event with full context for the UI
       this.emit({
         type: 'approval',
         data: {
-          id: generateId('approval'),
+          id: approvalId,
           message: `Agent wants to execute: ${toolName}`,
           toolName,
           toolArgs,
           actions: ['approve', 'reject'],
-          riskLevel: toolDef.definition.riskLevel,
+          riskLevel: toolDef.definition.riskLevel || 'medium',
+          description: toolDef.definition.description || '',
+          category: toolDef.definition.category || '',
         },
       });
-      // Auto-approve for now (WebSocket approval in future)
+
+      // Wait for user approval via WebSocket (auto-approves after 60s timeout)
+      logger.info(`Awaiting approval ${approvalId} for ${toolName}`);
+      const approved = await requestApproval(approvalId, 60000);
+
+      if (!approved) {
+        logger.info(`Tool ${toolName} REJECTED by user`);
+        this.emit({
+          type: 'tool_result',
+          data: {
+            toolName,
+            success: false,
+            output: 'Rejected by user — tool execution was not approved.',
+            durationMs: 0,
+          },
+        });
+        return {
+          success: false,
+          output: 'Rejected by user — tool execution was not approved.',
+          error: 'User rejected the tool execution.',
+          durationMs: 0,
+        };
+      }
+      logger.info(`Tool ${toolName} APPROVED`);
     }
 
     // Execute

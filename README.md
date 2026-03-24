@@ -31,7 +31,7 @@ A self-hosted, production-ready AI development platform featuring Mixture-of-Exp
 
 ## Features
 
-### Completed (v1.1.0)
+### Completed (v1.4.0)
 
 - **Mixture-of-Experts (MoE) LLM Router** — 6 providers: OpenAI, Anthropic, Google, Mistral, Groq, Ollama
   - Automatic model selection based on task type (code, review, RAG, planning)
@@ -69,20 +69,47 @@ A self-hosted, production-ready AI development platform featuring Mixture-of-Exp
   - Database: query (read), execute (write), schema
   - RAG: ingest, query, list docs, delete doc
 
+- **Conversation Persistence** (v1.3.0)
+  - PostgreSQL storage with in-memory fallback
+  - Conversation history sidebar (list, load, delete)
+  - Auto-generated titles from first message
+  - Token/cost tracking per conversation
+
+- **Token-by-Token Streaming** (v1.3.1)
+  - Live streamed text via SSE delta events
+  - Accumulate + markdown render on stream completion
+  - streamLLM integration in orchestrator ReAct loop
+
+- **RepairEngine — Autonomous Error Fix Loop** (v1.3.2)
+  - Detects 7 error categories (build, test, lint, runtime, dependency, syntax, type)
+  - Extracts file/line info from tool outputs
+  - Injects structured repair prompts into LLM context
+  - Max 3 retries per error, 8 total repairs per session
+  - Status badge UI (running/success/failed) in chat + trace
+
+- **Human-in-the-Loop Approval UI** (v1.4.0)
+  - Interactive approval cards in chat with Approve/Reject buttons
+  - Risk-level color coding (low/medium/high/critical)
+  - Tool arguments displayed with monospace formatting
+  - 60-second countdown timer with auto-approve on timeout
+  - WebSocket-driven: approval response sent via WS, orchestrator awaits
+  - Card updates in-place on approval/rejection
+  - Tools requiring approval: deploy, git push, GitHub ops, DB write, file delete, RAG delete
+
 - **GenUI Streaming Dashboard**
-  - Dark-mode Tailwind CSS interface
+  - Light-theme Tailwind CSS interface
   - Real-time SSE streaming of agent responses
   - Agent trace panel with timestamps
   - File explorer with syntax-aware icons
   - RAG document management modal
   - Settings panel with system status
   - WebSocket connection status indicator
-  - Chart, table, code block, terminal, file tree component renderers
+  - Chart, table, code block, terminal, file tree, status badge, progress bar component renderers
 
 - **WebSocket Real-Time Events**
   - Live agent event broadcasting
   - Connection management with auto-reconnect
-  - Human-in-the-loop approval system
+  - Human-in-the-loop approval via WebSocket (requestApproval → approval_response)
   - Heartbeat/ping-pong keep-alive
 
 - **Authentication** — JWT-based with bcrypt password hashing
@@ -266,27 +293,26 @@ webapp/
 
 ## What's Not Yet Implemented
 
-- Full conversation persistence to PostgreSQL (currently in-memory)
 - LLM-powered query expansion in RAG (currently keyword-based)
 - Cross-encoder reranking model for RAG
-- WebSocket-driven human-in-the-loop approval UI (currently auto-approves)
 - Multi-user isolation (workspaces are shared)
 - File watcher (chokidar integration for live file change events)
 - Background job queue (BullMQ is installed but not wired)
 - Image/vision tools
 - Rate limiting middleware per user
 - Production deployment to Cloudflare (this is a Node.js app, not edge)
+- Edit-and-resubmit for approval cards (currently approve/reject only)
 
 ## Recommended Next Steps
 
-1. Add conversation persistence (save/load from PostgreSQL)
-2. Implement WebSocket approval UI in the dashboard
-3. Wire BullMQ for background document ingestion
-4. Add per-user workspace isolation
-5. Add LLM-powered query expansion for RAG
-6. Implement file watcher for real-time workspace sync
-7. Add vision/image analysis tool support
-8. Rate-limit API endpoints per user
+1. Wire BullMQ for background document ingestion
+2. Add per-user workspace isolation
+3. Add LLM-powered query expansion for RAG
+4. Implement file watcher for real-time workspace sync
+5. Add vision/image analysis tool support
+6. Rate-limit API endpoints per user
+7. Add editable arguments in approval cards
+8. Multi-client approval sync (show pending approvals on reconnect)
 
 ## Deployment
 
