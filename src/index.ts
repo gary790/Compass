@@ -126,7 +126,7 @@ app.get('/', async (c) => {
 const agentPages: Record<string, string> = {
   '/ai-slides': 'public/ai-slides.html',
   '/ai-sheets': 'public/ai-sheets.html',
-  '/ai-docs': 'public/ai-slides.html',     // Placeholder
+  '/ai-docs': 'public/ai-docs.html',
   '/ai-designer': 'public/ai-slides.html', // Placeholder
   '/ai-image': 'public/ai-slides.html',    // Placeholder
   '/ai-music': 'public/ai-slides.html',    // Placeholder
