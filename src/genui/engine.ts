@@ -86,6 +86,58 @@ export class SSEWriter {
     });
   }
 
+  writeRepairStart(errorCount: number, errors: { category: string; message: string; file?: string }[]) {
+    this.write({
+      type: 'component',
+      id: generateId('evt'),
+      timestamp: Date.now(),
+      data: {
+        name: 'status_badge',
+        props: {
+          label: 'Auto-Repair',
+          status: 'running',
+          color: 'yellow',
+          detail: `Detected ${errorCount} error(s), attempting auto-fix...`,
+          errors: errors.map(e => ({ category: e.category, message: e.message, file: e.file })),
+        },
+      } as any,
+    });
+  }
+
+  writeRepairSuccess(fixedCount: number) {
+    this.write({
+      type: 'component',
+      id: generateId('evt'),
+      timestamp: Date.now(),
+      data: {
+        name: 'status_badge',
+        props: {
+          label: 'Auto-Repair',
+          status: 'success',
+          color: 'green',
+          detail: `Successfully fixed ${fixedCount} error(s)`,
+        },
+      } as any,
+    });
+  }
+
+  writeRepairFailed(errorCount: number, reason: string) {
+    this.write({
+      type: 'component',
+      id: generateId('evt'),
+      timestamp: Date.now(),
+      data: {
+        name: 'status_badge',
+        props: {
+          label: 'Auto-Repair',
+          status: 'failed',
+          color: 'red',
+          detail: `Failed to fix ${errorCount} error(s): ${reason}`,
+        },
+      } as any,
+    });
+  }
+
   writeDone(summary: string, usage?: any) {
     this.write({
       type: 'done',

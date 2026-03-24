@@ -4,6 +4,7 @@ import {
   ToolExecutionResult, GenUIEvent
 } from '../types/index.js';
 import { callLLM, streamLLM } from '../llm/router.js';
+import { RepairEngine, DetectedError } from './repair.js';
 import { toolRegistry } from '../tools/index.js';
 import { getBestModelForTask, agentConfig } from '../config/index.js';
 import { createLogger, generateId, withTimeout, costTracker } from '../utils/index.js';
@@ -158,6 +159,7 @@ export class Orchestrator {
   private totalCostUSD: number = 0;
   private modelsUsed: Set<string> = new Set();
   private toolsUsed: Set<string> = new Set();
+  private repairEngine: RepairEngine = new RepairEngine(3, 8);
 
   constructor(
     conversationId: string,
@@ -280,6 +282,9 @@ export class Orchestrator {
           const concurrencyLimit = agentConfig.maxConcurrentTools || 3;
           const toolCallBatches = chunkArray(response.toolCalls, concurrencyLimit);
 
+          // Collect all tool results for repair scanning
+          const allToolResults: { toolName: string; success: boolean; output: any }[] = [];
+
           for (const batch of toolCallBatches) {
             const results = await Promise.allSettled(
               batch.map(tc => this.executeTool(tc, primaryAgent))
@@ -295,8 +300,18 @@ export class Orchestrator {
                 resultContent = result.success
                   ? JSON.stringify(result.output, null, 2)
                   : `Error: ${result.error}`;
+                allToolResults.push({
+                  toolName: tc.function.name,
+                  success: result.success,
+                  output: result.output,
+                });
               } else {
                 resultContent = `Error: ${settledResult.reason?.message || 'Unknown error'}`;
+                allToolResults.push({
+                  toolName: tc.function.name,
+                  success: false,
+                  output: { error: settledResult.reason?.message },
+                });
               }
 
               messages.push({
@@ -305,6 +320,38 @@ export class Orchestrator {
                 tool_call_id: tc.id,
               });
             }
+          }
+
+          // === REPAIR LOOP: Scan tool results for auto-fixable errors ===
+          const repairResult = this.repairEngine.scanToolResults(allToolResults);
+          if (repairResult.shouldRepair && repairResult.repairPrompt) {
+            const errorSummary = repairResult.errors.map(e => `[${e.category}] ${e.message.substring(0, 80)}`).join('; ');
+            logger.info(`Repair triggered: ${repairResult.errors.length} error(s) — ${errorSummary}`);
+
+            // Emit repair_start event for the frontend
+            this.emit({
+              type: 'component',
+              data: {
+                name: 'status_badge',
+                props: {
+                  label: 'Auto-Repair',
+                  status: 'running',
+                  color: 'yellow',
+                  detail: `Detected ${repairResult.errors.length} error(s): ${errorSummary}`,
+                },
+              },
+            });
+
+            // Record the attempt
+            this.repairEngine.recordAttempt(repairResult.errors);
+
+            // Inject repair prompt into the conversation so the LLM fixes the issue
+            messages.push({
+              role: 'user',
+              content: repairResult.repairPrompt,
+            });
+
+            // The next iteration of the ReAct loop will pick this up and attempt the fix
           }
         } else if (!response.content) {
           // No tools, no content — break

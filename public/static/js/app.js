@@ -575,6 +575,13 @@ function handleSSEEvent(event, contentDiv, tracePanel) {
       break;
     case 'component':
       renderGenUIComponent(contentDiv, event.data);
+      // Add trace item for repair-related status badges
+      if (event.data.name === 'status_badge' && event.data.props?.label === 'Auto-Repair') {
+        const s = event.data.props.status;
+        const icon = s === 'running' ? 'fas fa-tools' : s === 'success' ? 'fas fa-check-double' : 'fas fa-exclamation-circle';
+        const color = s === 'running' ? 'text-yellow-500' : s === 'success' ? 'text-green-500' : 'text-red-500';
+        addTraceItem(tracePanel, `<span class="font-semibold">Repair:</span> ${event.data.props.detail || s}`, icon, color);
+      }
       break;
     case 'approval':
       addTraceItem(tracePanel, event.data.message, 'fas fa-shield-alt', 'text-orange-500');
@@ -747,6 +754,39 @@ function renderGenUIComponent(div, data) {
     case 'source_cards':
       div.innerHTML += `<div class="mt-3"><div class="text-xs text-gray-500 mb-2"><i class="fas fa-database mr-1"></i>Sources for: "${props.query}"</div><div class="space-y-1">${(props.sources||[]).map(s=>`<div class="p-2 bg-gray-50 rounded border border-gray-200 text-xs"><div class="font-semibold text-gray-700">${s.documentTitle||'Unknown'}</div><div class="text-gray-500 mt-1">${(s.content||'').substring(0,200)}...</div><div class="text-gray-400 mt-1">Score: ${s.score||0} | Type: ${s.searchType||'hybrid'}</div></div>`).join('')}</div></div>`;
       break;
+    case 'status_badge': {
+      const colors = { running: 'yellow', success: 'green', failed: 'red', info: 'blue' };
+      const icons = { running: 'fa-sync fa-spin', success: 'fa-check-circle', failed: 'fa-times-circle', info: 'fa-info-circle' };
+      const bgColors = { running: 'bg-yellow-50 border-yellow-200', success: 'bg-green-50 border-green-200', failed: 'bg-red-50 border-red-200', info: 'bg-blue-50 border-blue-200' };
+      const textColors = { running: 'text-yellow-700', success: 'text-green-700', failed: 'text-red-700', info: 'text-blue-700' };
+      const s = props.status || 'info';
+      const bg = bgColors[s] || bgColors.info;
+      const tc = textColors[s] || textColors.info;
+      const ic = icons[s] || icons.info;
+      let errorsHtml = '';
+      if (props.errors && props.errors.length > 0) {
+        errorsHtml = `<div class="mt-1.5 space-y-0.5">${props.errors.map(e =>
+          `<div class="text-xs ${tc} opacity-80"><span class="font-mono bg-white bg-opacity-50 px-1 rounded">${e.category}</span> ${escapeHtml(e.message.substring(0,120))}${e.file ? ` <span class="text-gray-400">${e.file}</span>` : ''}</div>`
+        ).join('')}</div>`;
+      }
+      div.innerHTML += `<div class="mt-2 p-2.5 ${bg} border rounded-lg text-xs ${tc} flex items-start gap-2">
+        <i class="fas ${ic} mt-0.5 shrink-0"></i>
+        <div class="min-w-0">
+          <span class="font-semibold">${escapeHtml(props.label || 'Status')}</span>
+          <span class="opacity-75 ml-1">${escapeHtml(props.detail || '')}</span>
+          ${errorsHtml}
+        </div>
+      </div>`;
+      break;
+    }
+    case 'progress_bar': {
+      const pct = Math.min(100, Math.max(0, ((props.value || 0) / (props.max || 100)) * 100));
+      div.innerHTML += `<div class="mt-2 p-2 bg-gray-50 rounded-lg border border-gray-200 text-xs">
+        <div class="flex justify-between mb-1"><span class="text-gray-600">${escapeHtml(props.label || '')}</span><span class="text-gray-400">${pct.toFixed(0)}%</span></div>
+        <div class="w-full bg-gray-200 rounded-full h-1.5"><div class="bg-indigo-500 h-1.5 rounded-full transition-all duration-300" style="width:${pct}%"></div></div>
+      </div>`;
+      break;
+    }
     default:
       div.innerHTML += `<div class="mt-2 p-2 bg-gray-50 rounded-lg text-xs text-gray-500 border border-gray-200"><i class="fas fa-puzzle-piece mr-1"></i>Component: ${name}</div>`;
   }
