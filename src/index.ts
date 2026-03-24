@@ -129,7 +129,11 @@ app.get('*', async (c) => {
 // STARTUP
 // ============================================================
 async function startup() {
-  logger.info('');
+  console.log('');
+  console.log('  Agentic RAG Platform v1.1.0');
+  console.log('  Starting up...');
+  console.log('');
+
   logger.info('╔══════════════════════════════════════╗');
   logger.info('║   Agentic RAG Platform v1.1.0       ║');
   logger.info('║   MoE · Hybrid RAG · 45+ Tools      ║');
@@ -140,14 +144,14 @@ async function startup() {
   // Initialize tools
   initializeTools();
 
-  // Test database connection
+  // Test database connection (non-blocking — app works without it)
   const dbConnected = await testConnection();
   if (!dbConnected) {
     logger.warn('⚠ PostgreSQL not connected — some features will be limited');
-    logger.warn('  Run: docker-compose up -d');
+    logger.warn('  (Optional) Run: docker-compose up -d');
   }
 
-  // Connect Redis
+  // Connect Redis (non-blocking — app works without it)
   const redisConnected = await connectRedis();
   if (!redisConnected) {
     logger.warn('⚠ Redis not connected — caching and rate limiting disabled');
@@ -159,17 +163,37 @@ async function startup() {
   } catch {}
 
   // Start server with WebSocket support
+  // Use localhost instead of 0.0.0.0 on Windows to avoid firewall popups
+  const host = serverConfig.host;
+  const port = serverConfig.port;
+
   const server = serve({
     fetch: app.fetch,
-    hostname: serverConfig.host,
-    port: serverConfig.port,
+    hostname: host,
+    port: port,
   }, (info) => {
+    console.log('');
+    console.log(`  ✔ Server running at http://localhost:${port}`);
+    console.log(`  ✔ Open http://localhost:${port} in your browser`);
+    console.log('');
     logger.info(`🚀 Server:    http://${info.address}:${info.port}`);
-    logger.info(`📊 Dashboard: http://localhost:${serverConfig.port}`);
-    logger.info(`🔌 WebSocket: ws://localhost:${serverConfig.port}/ws`);
-    logger.info(`📡 API:       http://localhost:${serverConfig.port}/api`);
-    logger.info(`❤️  Health:    http://localhost:${serverConfig.port}/api/health`);
+    logger.info(`📊 Dashboard: http://localhost:${port}`);
+    logger.info(`🔌 WebSocket: ws://localhost:${port}/ws`);
+    logger.info(`📡 API:       http://localhost:${port}/api`);
+    logger.info(`❤️  Health:    http://localhost:${port}/api/health`);
     logger.info('');
+  });
+
+  // Handle server errors (e.g., port already in use)
+  server.on('error', (err: NodeJS.ErrnoException) => {
+    if (err.code === 'EADDRINUSE') {
+      console.error(`\n  ERROR: Port ${port} is already in use.`);
+      console.error(`  Fix: Close the other program using port ${port}, or`);
+      console.error(`  set PORT=3001 in your .env file and try again.\n`);
+    } else {
+      console.error(`\n  ERROR: ${err.message}\n`);
+    }
+    process.exit(1);
   });
 
   // Inject WebSocket into the HTTP server
@@ -192,7 +216,20 @@ h1{color:#e94560}a{color:#74b9ff}</style></head>
 </div></body></html>`;
 }
 
+// Catch unhandled errors so Windows doesn't silently close the terminal
+process.on('uncaughtException', (err) => {
+  console.error(`\n  FATAL ERROR: ${err.message}\n`);
+  console.error(err.stack);
+  process.exit(1);
+});
+
+process.on('unhandledRejection', (reason: any) => {
+  console.error(`\n  UNHANDLED PROMISE: ${reason?.message || reason}\n`);
+});
+
 startup().catch((error) => {
+  console.error(`\n  STARTUP FAILED: ${error.message}\n`);
+  console.error(error.stack);
   logger.error(`Startup failed: ${error.message}`);
   process.exit(1);
 });
