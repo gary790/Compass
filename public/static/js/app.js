@@ -14,6 +14,7 @@ let wsReconnectAttempt = 0;
 let activeSidebar = null;
 let activeWorkspaceTab = 'preview';
 let conversationList = [];
+let streamedText = '';  // Accumulates streamed text tokens for markdown rendering
 
 document.addEventListener('DOMContentLoaded', () => {
   loadWorkspaces();
@@ -496,6 +497,7 @@ async function sendMessage() {
 
   const assistantDiv = addChatMessage('assistant', '', true);
   const contentDiv = assistantDiv.querySelector('.message-content');
+  streamedText = '';  // Reset streamed text accumulator for new message
 
   try {
     const res = await fetch('/api/chat', {
@@ -545,8 +547,18 @@ function handleSSEEvent(event, contentDiv, tracePanel) {
       break;
     case 'text':
       removeThinking(contentDiv);
-      if (event.data.delta) appendText(contentDiv, event.data.content);
-      else contentDiv.innerHTML = renderMarkdown(event.data.content);
+      if (event.data.delta) {
+        // Token-by-token streaming: append raw text and show live
+        streamedText += event.data.content;
+        appendStreamedText(contentDiv, event.data.content, streamedText);
+      } else {
+        // Final text: render full content as markdown (end of stream)
+        const finalContent = event.data.content || streamedText;
+        if (finalContent) {
+          contentDiv.innerHTML = renderMarkdown(finalContent);
+        }
+        streamedText = '';  // Reset for next iteration
+      }
       break;
     case 'tool_call':
       addTraceItem(tracePanel,
@@ -642,6 +654,40 @@ function appendText(div, text) {
   const el = div.querySelector('.streamed-text');
   if (el) el.textContent += text;
   else div.innerHTML += `<span class="streamed-text">${escapeHtml(text)}</span>`;
+}
+
+// Streaming-aware text appender: shows raw text live, periodically re-renders markdown
+let _streamRenderTimer = null;
+function appendStreamedText(div, delta, fullText) {
+  removeThinking(div);
+  // Fast path: append raw text character-by-character
+  let el = div.querySelector('.streamed-text');
+  if (!el) {
+    // Clear any previous non-streaming content
+    const existingTools = div.querySelectorAll('.tool-execution');
+    div.innerHTML = '';
+    existingTools.forEach(t => div.appendChild(t));
+    el = document.createElement('div');
+    el.className = 'streamed-text prose prose-sm max-w-none';
+    div.appendChild(el);
+  }
+  // Periodically re-render as markdown for live formatting (every 300ms)
+  if (_streamRenderTimer) clearTimeout(_streamRenderTimer);
+  _streamRenderTimer = setTimeout(() => {
+    if (el && fullText) {
+      try {
+        el.innerHTML = renderMarkdown(fullText);
+      } catch {
+        el.textContent = fullText;
+      }
+    }
+    _streamRenderTimer = null;
+  }, 300);
+  // Immediate: show raw text so user sees typing effect with no delay
+  if (!_streamRenderTimer) {
+    // First chunk — just set it
+    el.textContent = fullText;
+  }
 }
 
 function showToolCall(div, toolName, args) {

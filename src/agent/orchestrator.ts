@@ -1,8 +1,9 @@
 import {
   AgentNode, AgentType, AgentState, OrchestrationState, AgentStepEvent,
-  LLMMessage, LLMToolCall, ToolExecutionResult, GenUIEvent
+  LLMMessage, LLMToolCall, LLMStreamChunk, LLMCompletionRequest, LLMCompletionResponse,
+  ToolExecutionResult, GenUIEvent
 } from '../types/index.js';
-import { callLLM } from '../llm/router.js';
+import { callLLM, streamLLM } from '../llm/router.js';
 import { toolRegistry } from '../tools/index.js';
 import { getBestModelForTask, agentConfig } from '../config/index.js';
 import { createLogger, generateId, withTimeout, costTracker } from '../utils/index.js';
@@ -235,19 +236,17 @@ export class Orchestrator {
       logger.info(`Iteration ${this.state.iteration}/${this.state.maxIterations}`);
 
       try {
-        // REASON: Call LLM
-        const response = await withTimeout(
-          callLLM({
-            provider: model.provider,
-            model: model.model,
-            messages,
-            tools: tools as any,
-            temperature: agentDef.llmConfig.temperature,
-            maxTokens: agentDef.llmConfig.maxTokens,
-          }),
-          agentConfig.timeoutMs,
-          'LLM call timed out'
-        );
+        const llmRequest = {
+          provider: model.provider,
+          model: model.model,
+          messages,
+          tools: tools as any,
+          temperature: agentDef.llmConfig.temperature,
+          maxTokens: agentDef.llmConfig.maxTokens,
+        };
+
+        // Use streaming to get token-by-token output
+        const response = await this.streamAndCollect(llmRequest);
 
         // Track costs
         this.totalTokens += response.usage.totalTokens;
@@ -257,6 +256,7 @@ export class Orchestrator {
         // === STOP: text-only response ===
         if (response.finishReason === 'stop' && response.content) {
           finalResponse = response.content;
+          // Signal end of streamed text so frontend can finalize markdown rendering
           this.emit({ type: 'text', data: { content: response.content, delta: false } });
           break;
         }
@@ -275,10 +275,6 @@ export class Orchestrator {
             content: response.content || '',
             tool_calls: response.toolCalls,
           });
-
-          if (response.content) {
-            this.emit({ type: 'text', data: { content: response.content, delta: false } });
-          }
 
           // Execute tools (respect concurrency limit)
           const concurrencyLimit = agentConfig.maxConcurrentTools || 3;
@@ -317,7 +313,7 @@ export class Orchestrator {
         } else {
           // Content but finish_reason is not 'stop' (edge case)
           finalResponse = response.content;
-          this.emit({ type: 'text', data: { content: response.content, delta: false } });
+          this.emit({ type: 'text', data: { content: finalResponse, delta: false } });
           break;
         }
 
@@ -454,6 +450,97 @@ export class Orchestrator {
       const best = getBestModelForTask('general_reasoning');
       return { provider: best.provider, model: best.model };
     }
+  }
+
+  // ============================================================
+  // STREAMING COLLECT — Streams text tokens live, collects tool calls
+  // ============================================================
+  private async streamAndCollect(req: LLMCompletionRequest): Promise<LLMCompletionResponse> {
+    const startMs = Date.now();
+    let content = '';
+    let hasTextContent = false;
+    const toolCallMap = new Map<number, { id: string; name: string; args: string }>();
+    let usage: LLMCompletionResponse['usage'] = { inputTokens: 0, outputTokens: 0, totalTokens: 0, costUSD: 0 };
+
+    try {
+      const stream = streamLLM(req);
+      let currentToolIndex = -1;
+
+      for await (const chunk of stream) {
+        if (this.aborted) break;
+
+        switch (chunk.type) {
+          case 'text_delta':
+            if (chunk.content) {
+              content += chunk.content;
+              hasTextContent = true;
+              // Emit each text token as a delta SSE event for live streaming
+              this.emit({ type: 'text', data: { content: chunk.content, delta: true } });
+            }
+            break;
+
+          case 'tool_call_delta':
+            // Tool call deltas come in parts: first with id+name, then with argument chunks
+            if (chunk.toolCallId || chunk.toolName) {
+              currentToolIndex++;
+              toolCallMap.set(currentToolIndex, {
+                id: chunk.toolCallId || generateId('tc'),
+                name: chunk.toolName || '',
+                args: chunk.toolArgs || '',
+              });
+            } else if (chunk.toolArgs && currentToolIndex >= 0) {
+              const tc = toolCallMap.get(currentToolIndex);
+              if (tc) tc.args += chunk.toolArgs;
+            }
+            break;
+
+          case 'usage':
+            if (chunk.usage) usage = chunk.usage;
+            break;
+
+          case 'done':
+            break;
+
+          case 'error':
+            throw new Error(chunk.error || 'Stream error');
+        }
+      }
+    } catch (error: any) {
+      // If we collected some streamed text before the error, still return it
+      if (!hasTextContent && toolCallMap.size === 0) {
+        throw error;
+      }
+      logger.warn(`Stream error after partial data: ${error.message}`);
+    }
+
+    // Build tool calls array
+    const toolCalls: LLMToolCall[] = [];
+    for (const [, tc] of toolCallMap) {
+      if (tc.name) {
+        toolCalls.push({
+          id: tc.id,
+          type: 'function',
+          function: { name: tc.name, arguments: tc.args || '{}' },
+        });
+      }
+    }
+
+    // Determine finish reason
+    let finishReason: LLMCompletionResponse['finishReason'] = 'stop';
+    if (toolCalls.length > 0) {
+      finishReason = 'tool_calls';
+    }
+
+    return {
+      id: generateId('stream'),
+      provider: req.provider,
+      model: req.model,
+      content: content || null,
+      toolCalls,
+      usage,
+      finishReason,
+      latencyMs: Date.now() - startMs,
+    };
   }
 
   getState(): OrchestrationState {

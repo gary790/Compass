@@ -652,6 +652,16 @@ export async function callLLM(req: LLMCompletionRequest): Promise<LLMCompletionR
 export async function* streamLLM(req: LLMCompletionRequest): AsyncGenerator<LLMStreamChunk> {
   const provider = req.provider;
 
+  // Validate API key
+  if (provider !== 'ollama' && !llmApiKeys[provider]) {
+    throw new Error(`No API key configured for ${provider}. Add ${provider.toUpperCase()}_API_KEY to .env`);
+  }
+
+  logger.info(`Streaming ${provider}/${req.model}`, {
+    messages: req.messages.length,
+    tools: req.tools?.length || 0,
+  });
+
   if (provider === 'openai') {
     yield* streamOpenAICompatible(req, llmApiKeys.openai);
   } else if (provider === 'groq') {
