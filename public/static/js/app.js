@@ -586,8 +586,7 @@ function buildConversationListPanel() {
 
 function startNewConversation() {
   currentConversationId = null;
-  document.getElementById('chatMessages').innerHTML = '';
-  addWelcomeMessage();
+  switchToHomePage();
   document.getElementById('chatInput').focus();
   closeSidePanel();
   // Highlight "chat" button
@@ -1143,9 +1142,15 @@ setInterval(() => { sendWSMessage('ping', { timestamp: Date.now() }); }, 30000);
 // CHAT
 // ============================================================
 async function sendMessage() {
-  const input = document.getElementById('chatInput');
+  // Get text from whichever input is visible (home page or active chat)
+  const homeInput = document.getElementById('chatInput');
+  const activeInput = document.getElementById('chatInputActive');
+  const input = homeInput && homeInput.offsetParent !== null ? homeInput : (activeInput || homeInput);
   const message = input.value.trim();
   if (!message || isStreaming) return;
+
+  // Switch from home page to chat mode
+  switchToChatMode();
 
   input.value = ''; autoResize(input);
   isStreaming = true; updateSendButton(true);
@@ -1190,11 +1195,41 @@ async function sendMessage() {
   refreshFileTree();
   // Refresh conversation list after each message (updates title, timestamps)
   loadConversationList();
+  // Focus the active chat input for follow-up messages
+  const chatActiveInput = document.getElementById('chatInputActive');
+  if (chatActiveInput) chatActiveInput.focus();
 }
 
 function sendQuickAction(msg) {
-  document.getElementById('chatInput').value = msg;
+  const homeInput = document.getElementById('chatInput');
+  const activeInput = document.getElementById('chatInputActive');
+  const input = homeInput && homeInput.offsetParent !== null ? homeInput : (activeInput || homeInput);
+  input.value = msg;
   sendMessage();
+}
+
+// Switch from home page view to active chat view
+function switchToChatMode() {
+  const home = document.getElementById('homePage');
+  const chatHeader = document.getElementById('chatHeader');
+  const chatMessages = document.getElementById('chatMessages');
+  const chatInputArea = document.getElementById('chatInputArea');
+  if (home) home.style.display = 'none';
+  if (chatHeader) chatHeader.style.display = '';
+  if (chatMessages) chatMessages.style.display = '';
+  if (chatInputArea) chatInputArea.style.display = '';
+}
+
+// Switch back to home page view
+function switchToHomePage() {
+  const home = document.getElementById('homePage');
+  const chatHeader = document.getElementById('chatHeader');
+  const chatMessages = document.getElementById('chatMessages');
+  const chatInputArea = document.getElementById('chatInputArea');
+  if (home) home.style.display = '';
+  if (chatHeader) chatHeader.style.display = 'none';
+  if (chatMessages) { chatMessages.style.display = 'none'; chatMessages.innerHTML = ''; }
+  if (chatInputArea) chatInputArea.style.display = 'none';
 }
 
 // ============================================================
@@ -1823,6 +1858,17 @@ function truncateArgs(a) { const s = typeof a === 'string' ? a : JSON.stringify(
 function formatSize(b) { if (!b) return '0 B'; if (b < 1024) return b+' B'; if (b < 1048576) return (b/1024).toFixed(1)+' KB'; return (b/1048576).toFixed(1)+' MB'; }
 function autoResize(el) { el.style.height = 'auto'; el.style.height = Math.min(el.scrollHeight, 128) + 'px'; }
 function handleInputKeydown(e) { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(); } }
-function updateSendButton(s) { const b = document.getElementById('sendBtn'); b.innerHTML = s ? '<i class="fas fa-spinner fa-spin text-white text-xs"></i>' : '<i class="fas fa-arrow-up text-white text-xs"></i>'; b.disabled = s; }
-function updateTokenCounter() { document.getElementById('tokenCounter').textContent = `Tokens: ${totalTokens.toLocaleString()} | Cost: $${totalCost.toFixed(4)}`; }
+function updateSendButton(s) {
+  // Update home send button
+  const b = document.getElementById('sendBtn');
+  if (b) { b.innerHTML = s ? '<i class="fas fa-spinner fa-spin" style="font-size:10px"></i> <span>Sending</span>' : '<i class="fas fa-plus" style="font-size:10px"></i> <span>Send</span>'; b.disabled = s; }
+  // Update active chat send button
+  const b2 = document.getElementById('sendBtnActive');
+  if (b2) { b2.innerHTML = s ? '<i class="fas fa-spinner fa-spin text-white text-xs"></i>' : '<i class="fas fa-arrow-up text-white text-xs"></i>'; b2.disabled = s; }
+}
+function updateTokenCounter() {
+  const text = `Tokens: ${totalTokens.toLocaleString()} | Cost: $${totalCost.toFixed(4)}`;
+  const el1 = document.getElementById('tokenCounter'); if (el1) el1.textContent = text;
+  const el2 = document.getElementById('tokenCounterActive'); if (el2) el2.textContent = text;
+}
 function copyCode(btn) { const code = btn.closest('.mt-3').querySelector('code').textContent; navigator.clipboard.writeText(code); btn.innerHTML = '<i class="fas fa-check text-green-500"></i>'; setTimeout(() => btn.innerHTML = '<i class="fas fa-copy"></i>', 2000); }
