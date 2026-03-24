@@ -1,5 +1,5 @@
 // ============================================================
-// AGENTIC RAG PLATFORM — Frontend Application
+// AGENTIC RAG PLATFORM — Frontend Application v1.1
 // ============================================================
 
 // --- State ---
@@ -8,6 +8,9 @@ let currentWorkspace = 'default';
 let isStreaming = false;
 let totalTokens = 0;
 let totalCost = 0;
+let ws = null;
+let wsReconnectTimer = null;
+let wsReconnectAttempt = 0;
 
 // --- Initialize ---
 document.addEventListener('DOMContentLoaded', () => {
@@ -15,6 +18,7 @@ document.addEventListener('DOMContentLoaded', () => {
   loadWorkspace('default');
   loadRAGDocs();
   loadSystemInfo();
+  connectWebSocket();
   marked.setOptions({
     highlight: (code, lang) => {
       if (lang && hljs.getLanguage(lang)) {
@@ -25,6 +29,116 @@ document.addEventListener('DOMContentLoaded', () => {
     breaks: true,
   });
 });
+
+// ============================================================
+// WEBSOCKET — Real-time agent events
+// ============================================================
+function connectWebSocket() {
+  const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
+  const wsUrl = `${protocol}//${location.host}/ws`;
+
+  try {
+    ws = new WebSocket(wsUrl);
+
+    ws.onopen = () => {
+      wsReconnectAttempt = 0;
+      updateConnectionStatus('connected');
+      console.log('[WS] Connected');
+    };
+
+    ws.onmessage = (event) => {
+      try {
+        const msg = JSON.parse(event.data);
+        handleWebSocketMessage(msg);
+      } catch (e) {
+        console.warn('[WS] Invalid message:', e);
+      }
+    };
+
+    ws.onclose = () => {
+      updateConnectionStatus('disconnected');
+      scheduleReconnect();
+    };
+
+    ws.onerror = (err) => {
+      console.warn('[WS] Error:', err);
+      updateConnectionStatus('error');
+    };
+  } catch (e) {
+    console.warn('[WS] Connection failed:', e);
+    scheduleReconnect();
+  }
+}
+
+function scheduleReconnect() {
+  if (wsReconnectTimer) return;
+  wsReconnectAttempt++;
+  const delay = Math.min(1000 * Math.pow(2, wsReconnectAttempt), 30000);
+  wsReconnectTimer = setTimeout(() => {
+    wsReconnectTimer = null;
+    connectWebSocket();
+  }, delay);
+}
+
+function handleWebSocketMessage(msg) {
+  switch (msg.type) {
+    case 'system_event':
+      if (msg.payload?.event === 'connected') {
+        console.log('[WS] Server acknowledged connection:', msg.payload.clientId);
+      }
+      break;
+
+    case 'agent_event':
+      // Real-time agent trace from WebSocket (supplements SSE)
+      const tracePanel = document.getElementById('panel-trace');
+      if (tracePanel && msg.payload) {
+        handleWSAgentEvent(msg.payload, tracePanel);
+      }
+      break;
+
+    case 'pong':
+      // Heartbeat response
+      break;
+
+    default:
+      console.debug('[WS] Unhandled:', msg.type);
+  }
+}
+
+function handleWSAgentEvent(event, tracePanel) {
+  // Only show WS events for other conversations or background events
+  // Main conversation uses SSE for primary stream
+  if (event.type === 'tool_call') {
+    // Could update a global activity indicator
+  }
+}
+
+function updateConnectionStatus(status) {
+  const badge = document.getElementById('statusBadge');
+  if (!badge) return;
+
+  const configs = {
+    connected: { bg: 'bg-green-500/20', text: 'text-green-400', dot: 'bg-green-400', label: 'Live' },
+    disconnected: { bg: 'bg-yellow-500/20', text: 'text-yellow-400', dot: 'bg-yellow-400', label: 'Reconnecting' },
+    error: { bg: 'bg-red-500/20', text: 'text-red-400', dot: 'bg-red-400', label: 'Disconnected' },
+  };
+  const c = configs[status] || configs.error;
+  badge.className = `flex items-center gap-1.5 px-2 py-1 rounded-full ${c.bg} ${c.text} text-xs`;
+  badge.innerHTML = `<div class="w-1.5 h-1.5 rounded-full ${c.dot}"></div><span>${c.label}</span>`;
+}
+
+function sendWSMessage(type, payload) {
+  if (ws && ws.readyState === WebSocket.OPEN) {
+    ws.send(JSON.stringify({ type, id: Date.now().toString(36), payload }));
+  }
+}
+
+// Heartbeat (keep connection alive)
+setInterval(() => {
+  if (ws && ws.readyState === WebSocket.OPEN) {
+    sendWSMessage('ping', { timestamp: Date.now() });
+  }
+}, 30000);
 
 // ============================================================
 // CHAT — Send message and handle SSE streaming
@@ -527,13 +641,20 @@ async function loadSystemInfo() {
     const data = await res.json();
     if (data.success) {
       const d = data.data;
+      const wsInfo = d.websocket || {};
+      const costs = d.costs || {};
       document.getElementById('systemInfo').innerHTML = `
-        <div>Status: <span class="text-green-400">${d.status}</span></div>
-        <div>Database: <span class="${d.database === 'connected' ? 'text-green-400' : 'text-red-400'}">${d.database}</span></div>
-        <div>LLM Providers: <span class="text-primary-400">${d.llmProviders.join(', ')}</span></div>
-        <div>Tools: <span class="text-primary-400">${d.toolCount}</span></div>
-        <div>Memory: ${d.memory.used} / ${d.memory.total}</div>
-        <div>Uptime: ${Math.floor(d.uptime / 60)} minutes</div>`;
+        <div class="space-y-1.5">
+          <div>Status: <span class="text-green-400 font-semibold">${d.status}</span></div>
+          <div>Version: <span class="text-primary-400">${d.version || '1.1.0'}</span></div>
+          <div>Database: <span class="${d.database === 'connected' ? 'text-green-400' : 'text-red-400'}">${d.database}</span></div>
+          <div>LLM Providers: <span class="text-primary-400">${d.llmProviders.join(', ')}</span></div>
+          <div>Tools: <span class="text-primary-400">${d.toolCount}</span></div>
+          <div>Memory: ${d.memory.used} / ${d.memory.total} (RSS: ${d.memory.rss || '?'})</div>
+          <div>WebSocket Clients: <span class="text-primary-400">${wsInfo.connectedClients || 0}</span></div>
+          <div>Session Cost: <span class="text-yellow-400">$${(costs.sessionTotal || 0).toFixed(6)}</span></div>
+          <div>Uptime: ${Math.floor(d.uptime / 60)} min</div>
+        </div>`;
     }
   } catch {
     document.getElementById('systemInfo').innerHTML = '<div class="text-red-400">Could not load system info</div>';

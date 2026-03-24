@@ -3,6 +3,8 @@ import { getAvailableProviders, MODEL_REGISTRY, getModelsForProvider, MOE_ROUTIN
 import { toolRegistry } from '../tools/index.js';
 import { costTracker } from '../utils/index.js';
 import { testConnection } from '../database/client.js';
+import { getProviderHealth } from '../llm/router.js';
+import { getConnectedClients, getPendingApprovalCount } from './websocket.js';
 
 const systemRoutes = new Hono();
 
@@ -15,7 +17,7 @@ systemRoutes.get('/status', async (c) => {
     success: true,
     data: {
       status: 'running',
-      version: '1.0.0',
+      version: '1.1.0',
       uptime: process.uptime(),
       database: dbConnected ? 'connected' : 'disconnected',
       llmProviders: providers,
@@ -23,7 +25,14 @@ systemRoutes.get('/status', async (c) => {
       memory: {
         used: Math.round(process.memoryUsage().heapUsed / 1024 / 1024) + ' MB',
         total: Math.round(process.memoryUsage().heapTotal / 1024 / 1024) + ' MB',
+        rss: Math.round(process.memoryUsage().rss / 1024 / 1024) + ' MB',
       },
+      websocket: {
+        connectedClients: getConnectedClients().length,
+        pendingApprovals: getPendingApprovalCount(),
+      },
+      providerHealth: getProviderHealth(),
+      costs: costTracker.getSummary(),
     },
   });
 });
@@ -92,6 +101,17 @@ systemRoutes.get('/config', (c) => {
       defaultProvider: providers[0] || 'none',
       toolCategories: [...new Set(toolRegistry.getAll().map(t => t.category))],
       totalTools: toolRegistry.getAll().length,
+    },
+  });
+});
+
+// GET /api/system/websocket — WebSocket client info
+systemRoutes.get('/websocket', (c) => {
+  return c.json({
+    success: true,
+    data: {
+      clients: getConnectedClients(),
+      pendingApprovals: getPendingApprovalCount(),
     },
   });
 });

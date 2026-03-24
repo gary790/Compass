@@ -1,139 +1,122 @@
-# Agentic RAG Platform
+# Agentic RAG Platform v1.1.0
 
-A self-hosted AI development platform with Mixture-of-Experts LLM routing, hybrid RAG search, 45+ tools, GenUI streaming dashboard, and one-click deployment to Cloudflare/Vercel.
-
-## Quick Start
-
-### Option A: Docker Compose (Recommended)
-
-```bash
-# 1. Clone and configure
-git clone <your-repo-url>
-cd agentic-rag-platform
-cp .env.example .env
-# Edit .env and add your API keys (at minimum OPENAI_API_KEY)
-
-# 2. Start all services
-docker-compose up -d
-
-# 3. Run migrations and seed
-docker-compose exec app npx tsx src/database/migrate.ts
-docker-compose exec app npx tsx src/database/seed.ts
-
-# 4. Open dashboard
-open http://localhost:3000
-```
-
-### Option B: Local Development (without Docker)
-
-```bash
-# Prerequisites: Node.js 20+, PostgreSQL 16, Redis 7, ChromaDB
-
-# 1. Install dependencies
-npm install --legacy-peer-deps
-
-# 2. Configure environment
-cp .env.example .env
-# Edit .env with your database URLs and API keys
-
-# 3. Run migrations
-npx tsx src/database/migrate.ts
-npx tsx src/database/seed.ts
-
-# 4. Start the server
-npx tsx src/index.ts
-# Or with PM2:
-pm2 start ecosystem.config.cjs
-```
+A self-hosted, production-ready AI development platform featuring Mixture-of-Experts (MoE) LLM routing, Hybrid RAG with Reciprocal Rank Fusion, 45+ tools, GenUI streaming dashboard, WebSocket real-time events, and graph-based agent orchestration.
 
 ## Architecture
 
 ```
-                    Frontend (GenUI Dashboard)
-                    |  Chat  |  Agent Trace  |  File Explorer  |  Terminal  |  Preview  |
-                    =========================================================================
-                                          SSE / REST / WebSocket
-                    =========================================================================
-                              Hono Server (Node.js)
-                    =========================================================================
-                    |   Chat API   |   RAG API   |   Workspace API   |   Auth API   |   System API   |
-                    =========================================================================
-                              Agent Engine
-                    |   Graph Orchestrator   |   MoE LLM Router   |   Tool Registry   |   ReAct Loop   |
-                    =========================================================================
-                    |  OpenAI  |  Anthropic  |  Google  |  Mistral  |  Groq  |  Ollama  |
-                    =========================================================================
-                    |  PostgreSQL  |  Redis  |  ChromaDB  |  Filesystem  |
++-----------------------------------------------------+
+|               GenUI Dashboard (HTML/JS)              |
+|   Chat UI | File Explorer | Agent Trace | Terminal   |
++-----+---------------------------+--------------------+
+      | SSE Streaming             | WebSocket (ws://)
++-----v---------------------------v--------------------+
+|                   Hono Server (Node.js)              |
+|   /api/chat | /api/rag | /api/workspace | /api/auth  |
++-----+----------+----------+----------+--------------+
+      |          |          |          |
++-----v---+ +---v---+ +---v---+ +----v---------+
+| Router  | | RAG   | | Code  | | Deploy/Test/ |
+| Agent   | | Agent | | Agent | | Design/Review|
++---------+ +-------+ +-------+ +--------------+
+      |          |
++-----v---+ +---v-----------+
+| MoE LLM | | Hybrid Search |
+| Router   | | Vec+BM25+RRF  |
++---------+ +---+-----------+
+   |  |  |      |       |
+  OAI Ant Goo  ChromaDB PostgreSQL
+  Groq Mis Oll          Redis
 ```
 
 ## Features
 
-### Core Engine
-- **Graph Orchestrator** — ReAct loop with planning, execution, review cycle
-- **Mixture-of-Experts Router** — Routes tasks to the best LLM based on task type
-- **Tool Registry** — 45 tools across 10 categories with Zod validation
-- **Human-in-the-Loop** — Approval gates for dangerous operations
+### Completed (v1.1.0)
 
-### Multi-LLM Support (6 Providers, 14 Models)
-| Provider | Models | Best For |
-|----------|--------|----------|
-| OpenAI | GPT-4o, GPT-4o Mini, text-embedding-3-small | Code generation, planning, tool use |
-| Anthropic | Claude 3.5 Sonnet, Claude 3.5 Haiku | Code review, safety analysis, long context |
-| Google | Gemini 2.0 Flash, Gemini 2.0 Pro | Multimodal, huge context windows |
-| Mistral | Mistral Large, Mistral Small | Multilingual, cost-efficient |
-| Groq | Llama 3.1 70B, Llama 3.1 8B | Ultra-fast inference |
-| Ollama | Any local model | Privacy, offline, no API costs |
+- **Mixture-of-Experts (MoE) LLM Router** — 6 providers: OpenAI, Anthropic, Google, Mistral, Groq, Ollama
+  - Automatic model selection based on task type (code, review, RAG, planning)
+  - Retry logic with exponential backoff
+  - Provider health monitoring and tracking
+  - Response caching via Redis
+  - Cost tracking per model/session
+  - Anthropic streaming support
 
-### RAG Pipeline (Hybrid Search)
-- **Chunking** — Semantic-aware splitter (heading-based + sentence-level)
-- **Embeddings** — OpenAI text-embedding-3-small (or Ollama local)
-- **Vector Search** — ChromaDB with cosine similarity
-- **BM25 Search** — PostgreSQL full-text search with ts_rank_cd
-- **Reciprocal Rank Fusion** — Merges vector + BM25 with configurable weights
-- **Document Management** — Ingest, search, list, delete via API
+- **Graph-Based Agent Orchestrator** — 7 specialised sub-agents
+  - Router, RAG, Code, Deploy, Design, Test, Reviewer agents
+  - Intent-based routing (keyword heuristics)
+  - ReAct loop (Reason + Act) with configurable max iterations
+  - Concurrent tool execution with batching
+  - Human-in-the-loop approval gates
+  - Full cost aggregation across agent sessions
 
-### Tool Registry (45 Tools, 10 Categories)
+- **Hybrid RAG Pipeline** — BM25 + Vector + Reciprocal Rank Fusion
+  - Semantic chunking with heading-aware splitting
+  - ChromaDB vector store with cosine similarity
+  - PostgreSQL full-text search (BM25)
+  - RRF score fusion with configurable weights
+  - Query expansion (keyword extraction)
+  - Contextual compression (prune irrelevant sentences)
 
-| Category | Tools | Count |
-|----------|-------|-------|
-| **File** | read, write, edit, delete, search, info, create_dir, list_dir | 8 |
-| **Shell** | exec, npm_install, npm_run, process_list | 4 |
-| **System** | system_info | 1 |
-| **Git** | init, status, commit, log, diff, push, branch | 7 |
-| **GitHub** | create_repo, list_repos, read_file, edit_file, create_pr, list_issues | 6 |
-| **Deploy** | cloudflare, vercel, status, preview | 4 |
-| **Web** | search, scrape, fetch | 3 |
-| **Code** | analyze, explain, generate, test, refactor | 5 |
-| **Database** | query, execute, schema | 3 |
-| **RAG** | ingest, query, list_docs, delete_doc | 4 |
+- **45 Tools across 10 categories**
+  - File: read, write, edit, list, delete, search, info, mkdir
+  - Shell: exec, npm install, npm run, process list
+  - System: system info
+  - Git: init, status, commit, log, diff, push, branch
+  - GitHub: create repo, list repos, read/edit files, create PR, list issues
+  - Deploy: Cloudflare Pages, Vercel, status, preview
+  - Web: search (DuckDuckGo), scrape, fetch
+  - Code: analyze, explain, generate, test, refactor
+  - Database: query (read), execute (write), schema
+  - RAG: ingest, query, list docs, delete doc
 
-### GenUI Dashboard
-- **Streaming Chat** — Real-time SSE-based response streaming
-- **Agent Trace Viewer** — Watch the AI think, call tools, and reason
-- **File Explorer** — Interactive workspace file tree
-- **Terminal** — Execute commands through the agent
-- **Live Preview** — Preview deployed sites in-app
-- **RAG Manager** — Ingest and manage knowledge base documents
-- **Settings** — Configure LLM provider, approval mode, budget limits
-- **Dark Mode** — Full dark theme with smooth animations
+- **GenUI Streaming Dashboard**
+  - Dark-mode Tailwind CSS interface
+  - Real-time SSE streaming of agent responses
+  - Agent trace panel with timestamps
+  - File explorer with syntax-aware icons
+  - RAG document management modal
+  - Settings panel with system status
+  - WebSocket connection status indicator
+  - Chart, table, code block, terminal, file tree component renderers
 
-## API Endpoints
+- **WebSocket Real-Time Events**
+  - Live agent event broadcasting
+  - Connection management with auto-reconnect
+  - Human-in-the-loop approval system
+  - Heartbeat/ping-pong keep-alive
+
+- **Authentication** — JWT-based with bcrypt password hashing
+- **Docker Compose** — PostgreSQL 16, Redis 7, ChromaDB, app container
+- **Database migrations** — Automatic migration runner with tracking
+
+## URLs
+
+- **Live Dashboard**: https://3000-ividel0kd4tewoyclfy3j-82b888ba.sandbox.novita.ai
+- **Health Check**: /api/health
+- **System Status**: /api/system/status
+- **Tools List**: /api/system/tools
+- **Models List**: /api/system/models
+- **Cost Tracking**: /api/system/costs
+- **Provider Health**: /api/system/health/providers
+- **WebSocket**: ws://localhost:3000/ws
+
+## API Reference
 
 ### Chat
 | Method | Path | Description |
 |--------|------|-------------|
-| POST | `/api/chat` | Send message (SSE streaming response) |
-| GET | `/api/chat/conversations` | List conversations |
-| GET | `/api/chat/:id/history` | Get conversation history |
-| DELETE | `/api/chat/:id` | Delete conversation |
+| POST | `/api/chat` | Send message, get SSE stream response |
+| GET | `/api/chat/conversations` | List active conversations |
+| GET | `/api/chat/:id/history` | Get conversation message history |
+| DELETE | `/api/chat/:id` | Delete a conversation |
 
 ### RAG
 | Method | Path | Description |
 |--------|------|-------------|
 | POST | `/api/rag/ingest` | Ingest document into knowledge base |
-| POST | `/api/rag/search` | Search knowledge base (hybrid/vector/bm25) |
-| GET | `/api/rag/documents` | List all documents |
-| DELETE | `/api/rag/documents/:id` | Delete document |
+| POST | `/api/rag/search` | Hybrid search (vector+BM25+RRF) |
+| GET | `/api/rag/documents` | List all indexed documents |
+| DELETE | `/api/rag/documents/:id` | Delete a document |
 
 ### Workspace
 | Method | Path | Description |
@@ -147,7 +130,7 @@ pm2 start ecosystem.config.cjs
 ### Auth
 | Method | Path | Description |
 |--------|------|-------------|
-| POST | `/api/auth/register` | Create account |
+| POST | `/api/auth/register` | Register user |
 | POST | `/api/auth/login` | Login (returns JWT) |
 | GET | `/api/auth/me` | Get current user |
 | PUT | `/api/auth/settings` | Update settings |
@@ -157,141 +140,156 @@ pm2 start ecosystem.config.cjs
 | Method | Path | Description |
 |--------|------|-------------|
 | GET | `/api/health` | Health check |
-| GET | `/api/system/status` | Platform status |
+| GET | `/api/system/status` | Full platform status |
 | GET | `/api/system/models` | Available LLM models |
-| GET | `/api/system/tools` | Registered tools |
-| GET | `/api/system/costs` | Usage and cost tracking |
-| GET | `/api/system/config` | Non-sensitive configuration |
+| GET | `/api/system/tools` | All registered tools |
+| GET | `/api/system/costs` | Session cost tracking |
+| GET | `/api/system/config` | Non-sensitive config |
+| GET | `/api/system/websocket` | WebSocket clients |
+| GET | `/api/system/health/providers` | Provider health |
 
 ## Data Architecture
 
-### PostgreSQL Schema
-- `users` — Accounts with encrypted API keys and settings
-- `conversations` — Chat sessions with token/cost tracking
-- `messages` — Individual messages with tool calls
-- `documents` — RAG knowledge base documents
-- `chunks` — Document chunks with full-text search (tsvector)
-- `deployments` — Deployment history
-- `agent_sessions` — Agent execution audit trail
-- `tool_executions` — Tool call audit trail
-- `api_key_usage` — Per-model cost tracking
+- **PostgreSQL** — Users, conversations, messages, documents, chunks, deployments, agent sessions, tool executions, API usage
+- **Redis** — LLM response caching, rate limiting, session state
+- **ChromaDB** — Vector embeddings for RAG search
+- **In-Memory** — Active conversations (Redis-backed in production)
 
-### ChromaDB Collections
-- `agentic_rag_docs` — Document embeddings (cosine similarity)
+## Quick Start
 
-### Redis
-- LLM response caching (1-hour TTL)
-- Rate limiting (sliding window)
-- Session storage
+### 1. Clone & Configure
+```bash
+git clone <repo-url>
+cd webapp
+cp .env.example .env
+# Add your API keys to .env (at minimum OPENAI_API_KEY)
+```
+
+### 2. Docker (Recommended)
+```bash
+docker-compose up -d    # Starts PostgreSQL, Redis, ChromaDB, App
+open http://localhost:3000
+```
+
+### 3. Local Development
+```bash
+npm install --legacy-peer-deps
+npx tsx src/index.ts    # Runs without Docker (DB/Redis optional)
+```
+
+### 4. Database Setup (if using PostgreSQL)
+```bash
+npm run db:migrate      # Apply migrations
+npm run db:seed         # Create admin user + sample data
+```
+
+## Tech Stack
+
+- **Runtime**: Node.js 20+ with TypeScript
+- **Framework**: Hono (lightweight, fast)
+- **LLM SDKs**: openai, @anthropic-ai/sdk, @google/generative-ai
+- **Vector DB**: ChromaDB (cosine similarity)
+- **Database**: PostgreSQL 16 (BM25 full-text + relational)
+- **Cache**: Redis 7 (ioredis)
+- **Frontend**: Tailwind CSS, Chart.js, Highlight.js, Marked
+- **Auth**: JWT + bcryptjs
+- **Process**: PM2 (dev), Docker (prod)
+
+## Environment Variables
+
+See `.env.example` for all options. Key variables:
+
+| Variable | Required | Description |
+|----------|----------|-------------|
+| `OPENAI_API_KEY` | Yes (if using OpenAI) | OpenAI API key |
+| `ANTHROPIC_API_KEY` | No | Anthropic Claude key |
+| `GOOGLE_AI_API_KEY` | No | Google Gemini key |
+| `DATABASE_URL` | No | PostgreSQL connection |
+| `REDIS_URL` | No | Redis connection |
+| `CHROMA_URL` | No | ChromaDB URL |
+| `GITHUB_TOKEN` | No | GitHub personal access token |
+| `CLOUDFLARE_API_TOKEN` | No | Cloudflare Pages deploy token |
 
 ## Project Structure
 
 ```
-agentic-rag-platform/
-├── src/
-│   ├── index.ts              # Hono server entry point
-│   ├── agent/
-│   │   └── orchestrator.ts   # ReAct loop + MoE dispatch
-│   ├── llm/
-│   │   └── router.ts         # Multi-provider LLM router (6 providers)
-│   ├── rag/
-│   │   └── pipeline.ts       # Ingest, chunk, embed, hybrid search
-│   ├── genui/
-│   │   └── engine.ts         # SSE stream writer + component registry
-│   ├── tools/
-│   │   ├── registry.ts       # Central tool registry with Zod validation
-│   │   ├── file/             # 8 file operation tools
-│   │   ├── shell/            # Shell, npm, process tools
-│   │   ├── git/              # 7 git operation tools
-│   │   ├── github/           # 6 GitHub API tools
-│   │   ├── deploy/           # Cloudflare + Vercel deployment
-│   │   ├── web/              # Search, scrape, fetch
-│   │   ├── code/             # Analyze, generate, test, refactor
-│   │   ├── db/               # PostgreSQL query tools
-│   │   └── rag/              # RAG search and ingest tools
-│   ├── routes/
-│   │   ├── chat.ts           # SSE streaming chat
-│   │   ├── rag.ts            # Knowledge base management
-│   │   ├── workspace.ts      # File explorer API
-│   │   ├── auth.ts           # JWT authentication
-│   │   └── system.ts         # Status, models, tools, costs
-│   ├── database/
-│   │   ├── client.ts         # PostgreSQL connection pool
-│   │   ├── redis.ts          # Redis cache + rate limiter
-│   │   ├── migrate.ts        # Migration runner
-│   │   ├── seed.ts           # Database seeder
-│   │   └── reset.ts          # Database reset
-│   ├── config/
-│   │   └── index.ts          # All configuration + model registry
-│   ├── types/
-│   │   └── index.ts          # Full TypeScript type definitions
-│   └── utils/
-│       └── index.ts          # Logger, encryption, cost tracker
-├── public/
-│   ├── index.html            # GenUI dashboard (full SPA)
-│   └── static/js/app.js      # Frontend application (607 lines)
-├── migrations/
-│   └── 001_initial_schema.sql
-├── docker-compose.yml        # Full stack: app + PG + Redis + Chroma
-├── Dockerfile                # Multi-stage production build
-├── ecosystem.config.cjs      # PM2 process manager config
-├── package.json
-├── tsconfig.json
-├── .env.example
-└── .gitignore
+webapp/
+  src/
+    index.ts              # Main server entry
+    agent/
+      orchestrator.ts     # Graph-based ReAct orchestrator
+    llm/
+      router.ts           # MoE LLM router (6 providers)
+    rag/
+      pipeline.ts         # Hybrid RAG (chunk, embed, search, RRF)
+    genui/
+      engine.ts           # SSE writer + component registry
+    routes/
+      chat.ts             # Chat SSE endpoint
+      rag.ts              # RAG ingest/search API
+      workspace.ts        # File/workspace management
+      system.ts           # Status, tools, models, costs
+      auth.ts             # JWT auth
+      websocket.ts        # WebSocket real-time events
+    tools/
+      registry.ts         # Tool registry singleton
+      index.ts            # Tool loader
+      file/               # File operations (8 tools)
+      shell/              # Shell + npm (4 tools)
+      git/                # Git operations (7 tools)
+      github/             # GitHub API (6 tools)
+      deploy/             # Cloudflare/Vercel (4 tools)
+      web/                # Search/scrape/fetch (3 tools)
+      code/               # Analyze/generate/test (5 tools)
+      db/                 # SQL query/execute/schema (3 tools)
+      rag/                # RAG tools (4 tools)
+    database/
+      client.ts           # PostgreSQL pool
+      redis.ts            # Redis client + cache + rate limiter
+      migrate.ts          # Migration runner
+      seed.ts             # Seed data
+    config/
+      index.ts            # All configuration + model registry
+    types/
+      index.ts            # TypeScript type definitions
+    utils/
+      index.ts            # Logger, ID gen, retry, encrypt, cost tracker
+  public/
+    index.html            # GenUI dashboard
+    static/js/app.js      # Frontend application
+  migrations/
+    001_initial_schema.sql # PostgreSQL schema
+  docker-compose.yml      # Full stack (PG + Redis + Chroma + App)
+  Dockerfile              # Multi-stage production build
+  ecosystem.config.cjs    # PM2 configuration
 ```
 
-## Configuration
+## What's Not Yet Implemented
 
-All configuration is through environment variables (see `.env.example`):
+- Full conversation persistence to PostgreSQL (currently in-memory)
+- LLM-powered query expansion in RAG (currently keyword-based)
+- Cross-encoder reranking model for RAG
+- WebSocket-driven human-in-the-loop approval UI (currently auto-approves)
+- Multi-user isolation (workspaces are shared)
+- File watcher (chokidar integration for live file change events)
+- Background job queue (BullMQ is installed but not wired)
+- Image/vision tools
+- Rate limiting middleware per user
+- Production deployment to Cloudflare (this is a Node.js app, not edge)
 
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `PORT` | 3000 | Server port |
-| `OPENAI_API_KEY` | — | OpenAI API key (required for default config) |
-| `ANTHROPIC_API_KEY` | — | Anthropic API key |
-| `GOOGLE_AI_API_KEY` | — | Google AI API key |
-| `GROQ_API_KEY` | — | Groq API key |
-| `MISTRAL_API_KEY` | — | Mistral API key |
-| `OLLAMA_BASE_URL` | localhost:11434 | Local Ollama instance |
-| `DATABASE_URL` | postgresql://... | PostgreSQL connection |
-| `REDIS_URL` | redis://localhost:6379 | Redis connection |
-| `CHROMA_URL` | http://localhost:8000 | ChromaDB URL |
-| `GITHUB_TOKEN` | — | GitHub personal access token |
-| `CLOUDFLARE_API_TOKEN` | — | Cloudflare API token |
-| `VERCEL_TOKEN` | — | Vercel deployment token |
-| `AGENT_MAX_ITERATIONS` | 25 | Max ReAct loop iterations |
-| `ENABLE_AUTH` | false | Enable JWT authentication |
+## Recommended Next Steps
 
-## Hardware Requirements
+1. Add conversation persistence (save/load from PostgreSQL)
+2. Implement WebSocket approval UI in the dashboard
+3. Wire BullMQ for background document ingestion
+4. Add per-user workspace isolation
+5. Add LLM-powered query expansion for RAG
+6. Implement file watcher for real-time workspace sync
+7. Add vision/image analysis tool support
+8. Rate-limit API endpoints per user
 
-| Tier | CPU | RAM | GPU | Cost | Use Case |
-|------|-----|-----|-----|------|----------|
-| **API-Only** | 4-core | 8 GB | None | $20-40/mo VPS | Cloud LLM APIs only |
-| **Hybrid** | 8-core | 32 GB | RTX 3060 12GB | $800-1200 build | API + local small models |
-| **Full Local** | 16-core | 64 GB | RTX 4090 24GB | $3.5k-5k build | Run all models locally |
+## Deployment
 
-## Deployment Options
-
-### Home Server (Docker + Cloudflare Tunnel)
-```bash
-docker-compose up -d
-cloudflared tunnel --url http://localhost:3000
-```
-
-### VPS (Docker + Let's Encrypt)
-```bash
-docker-compose up -d
-# Configure reverse proxy (nginx/caddy) with SSL
-```
-
-### Hybrid (VPS app + Home GPU)
-```bash
-# VPS: docker-compose up -d
-# Home: ollama serve
-# Connect via WireGuard/Cloudflare Tunnel
-```
-
-## License
-
-MIT
+- **Platform**: Self-hosted Node.js (Docker recommended)
+- **Status**: Running
+- **Last Updated**: 2026-03-24

@@ -8,6 +8,8 @@ import { createLogger } from './utils/index.js';
 import { initializeTools } from './tools/index.js';
 import { testConnection } from './database/client.js';
 import { connectRedis } from './database/redis.js';
+import { setupWebSocket, getConnectedClients, getPendingApprovalCount } from './routes/websocket.js';
+import { getProviderHealth } from './llm/router.js';
 
 // Import routes
 import chatRoutes from './routes/chat.js';
@@ -25,6 +27,11 @@ const logger = createLogger('Server');
 // CREATE HONO APP
 // ============================================================
 const app = new Hono();
+
+// ============================================================
+// WEBSOCKET SETUP (must happen before middleware)
+// ============================================================
+const { injectWebSocket } = setupWebSocket(app);
 
 // ============================================================
 // MIDDLEWARE
@@ -62,13 +69,33 @@ app.route('/api/system', systemRoutes);
 app.route('/api/auth', authRoutes);
 
 // ============================================================
-// HEALTH CHECK
+// HEALTH CHECK — Enhanced with detailed system state
 // ============================================================
 app.get('/api/health', (c) => {
   return c.json({
     status: 'ok',
+    version: '1.1.0',
     uptime: process.uptime(),
     timestamp: new Date().toISOString(),
+    memory: {
+      rss: Math.round(process.memoryUsage().rss / 1024 / 1024),
+      heapUsed: Math.round(process.memoryUsage().heapUsed / 1024 / 1024),
+      heapTotal: Math.round(process.memoryUsage().heapTotal / 1024 / 1024),
+    },
+    websocket: {
+      clients: getConnectedClients().length,
+      pendingApprovals: getPendingApprovalCount(),
+    },
+  });
+});
+
+// ============================================================
+// PROVIDER HEALTH ENDPOINT
+// ============================================================
+app.get('/api/system/health/providers', (c) => {
+  return c.json({
+    success: true,
+    data: getProviderHealth(),
   });
 });
 
@@ -84,8 +111,12 @@ app.get('/', async (c) => {
   }
 });
 
-// Catch-all for SPA routing
+// Catch-all for SPA routing (but NOT for /api/* or /ws)
 app.get('*', async (c) => {
+  const url = new URL(c.req.url);
+  if (url.pathname.startsWith('/api/') || url.pathname === '/ws') {
+    return c.notFound();
+  }
   try {
     const html = await fs.readFile(path.resolve('public/index.html'), 'utf-8');
     return c.html(html);
@@ -98,9 +129,13 @@ app.get('*', async (c) => {
 // STARTUP
 // ============================================================
 async function startup() {
-  logger.info('======================================');
-  logger.info('  Agentic RAG Platform v1.0.0');
-  logger.info('======================================');
+  logger.info('');
+  logger.info('╔══════════════════════════════════════╗');
+  logger.info('║   Agentic RAG Platform v1.1.0       ║');
+  logger.info('║   MoE · Hybrid RAG · 45+ Tools      ║');
+  logger.info('║   GenUI · WebSocket · Graph Orch.    ║');
+  logger.info('╚══════════════════════════════════════╝');
+  logger.info('');
 
   // Initialize tools
   initializeTools();
@@ -108,14 +143,14 @@ async function startup() {
   // Test database connection
   const dbConnected = await testConnection();
   if (!dbConnected) {
-    logger.warn('PostgreSQL not connected — some features will be limited');
-    logger.warn('Run docker-compose up -d to start the database');
+    logger.warn('⚠ PostgreSQL not connected — some features will be limited');
+    logger.warn('  Run: docker-compose up -d');
   }
 
   // Connect Redis
   const redisConnected = await connectRedis();
   if (!redisConnected) {
-    logger.warn('Redis not connected — caching and rate limiting disabled');
+    logger.warn('⚠ Redis not connected — caching and rate limiting disabled');
   }
 
   // Ensure workspace directory
@@ -123,18 +158,22 @@ async function startup() {
     await fs.mkdir(path.resolve('./workspaces/default'), { recursive: true });
   } catch {}
 
-  // Start server
+  // Start server with WebSocket support
   const server = serve({
     fetch: app.fetch,
     hostname: serverConfig.host,
     port: serverConfig.port,
   }, (info) => {
-    logger.info(`Server running at http://${info.address}:${info.port}`);
-    logger.info(`Dashboard: http://localhost:${serverConfig.port}`);
-    logger.info(`API:       http://localhost:${serverConfig.port}/api`);
-    logger.info(`Health:    http://localhost:${serverConfig.port}/api/health`);
-    logger.info('======================================');
+    logger.info(`🚀 Server:    http://${info.address}:${info.port}`);
+    logger.info(`📊 Dashboard: http://localhost:${serverConfig.port}`);
+    logger.info(`🔌 WebSocket: ws://localhost:${serverConfig.port}/ws`);
+    logger.info(`📡 API:       http://localhost:${serverConfig.port}/api`);
+    logger.info(`❤️  Health:    http://localhost:${serverConfig.port}/api/health`);
+    logger.info('');
   });
+
+  // Inject WebSocket into the HTTP server
+  injectWebSocket(server);
 }
 
 function generateFallbackHTML(): string {
@@ -144,11 +183,12 @@ function generateFallbackHTML(): string {
 .card{background:#16213e;padding:40px;border-radius:12px;text-align:center;max-width:500px}
 h1{color:#e94560}a{color:#74b9ff}</style></head>
 <body><div class="card">
-<h1>Agentic RAG Platform</h1>
-<p>The frontend hasn't been built yet.</p>
-<p>API is running: <a href="/api/health">/api/health</a></p>
-<p>System status: <a href="/api/system/status">/api/system/status</a></p>
-<p>Available tools: <a href="/api/system/tools">/api/system/tools</a></p>
+<h1>Agentic RAG Platform v1.1.0</h1>
+<p>The dashboard will appear once the frontend is loaded.</p>
+<p>API: <a href="/api/health">/api/health</a></p>
+<p>Status: <a href="/api/system/status">/api/system/status</a></p>
+<p>Tools: <a href="/api/system/tools">/api/system/tools</a></p>
+<p>WebSocket: <code>ws://localhost:3000/ws</code></p>
 </div></body></html>`;
 }
 

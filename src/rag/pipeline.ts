@@ -10,8 +10,8 @@ const logger = createLogger('RAG');
 // DOCUMENT CHUNKING — Semantic-aware splitter
 // ============================================================
 interface ChunkOptions {
-  chunkSize: number;    // target tokens per chunk
-  chunkOverlap: number; // overlap tokens between chunks
+  chunkSize: number;
+  chunkOverlap: number;
 }
 
 export function chunkDocument(
@@ -20,7 +20,7 @@ export function chunkDocument(
 ): { content: string; metadata: { heading?: string; chunkIndex: number } }[] {
   const chunks: { content: string; metadata: { heading?: string; chunkIndex: number } }[] = [];
 
-  // First, split by headings (markdown or HTML)
+  // Split by headings first (markdown or HTML)
   const sections = splitByHeadings(content);
 
   let chunkIndex = 0;
@@ -30,10 +30,7 @@ export function chunkDocument(
       if (chunkContent.trim().length > 10) {
         chunks.push({
           content: chunkContent.trim(),
-          metadata: {
-            heading: section.heading,
-            chunkIndex: chunkIndex++,
-          },
+          metadata: { heading: section.heading, chunkIndex: chunkIndex++ },
         });
       }
     }
@@ -61,16 +58,9 @@ function splitByHeadings(content: string): { heading?: string; content: string }
     lastIndex = match.index + match[0].length;
   }
 
-  // Remaining content
   const remaining = content.substring(lastIndex).trim();
-  if (remaining) {
-    sections.push({ heading: lastHeading, content: remaining });
-  }
-
-  // If no headings found, return the whole document
-  if (sections.length === 0) {
-    sections.push({ content });
-  }
+  if (remaining) sections.push({ heading: lastHeading, content: remaining });
+  if (sections.length === 0) sections.push({ content });
 
   return sections;
 }
@@ -83,10 +73,8 @@ function splitByTokenCount(text: string, chunkSize: number, overlap: number): st
 
   for (const sentence of sentences) {
     const sentenceTokens = estimateTokens(sentence);
-
     if (currentTokens + sentenceTokens > chunkSize && currentChunk) {
       chunks.push(currentChunk);
-      // Keep overlap
       const overlapText = getOverlapText(currentChunk, overlap);
       currentChunk = overlapText + sentence;
       currentTokens = estimateTokens(currentChunk);
@@ -96,10 +84,7 @@ function splitByTokenCount(text: string, chunkSize: number, overlap: number): st
     }
   }
 
-  if (currentChunk.trim()) {
-    chunks.push(currentChunk);
-  }
-
+  if (currentChunk.trim()) chunks.push(currentChunk);
   return chunks;
 }
 
@@ -137,6 +122,70 @@ async function getChromaCollection(collectionName?: string) {
 }
 
 // ============================================================
+// QUERY EXPANSION — Generate synonyms/alternative queries
+// ============================================================
+function expandQuery(query: string): string[] {
+  // Simple keyword-based expansion (LLM-based expansion can be added later)
+  const queries = [query];
+
+  // Remove stop words and generate a keyword-only version
+  const stopWords = new Set(['the', 'a', 'an', 'is', 'are', 'was', 'were', 'what', 'how', 'why', 'when', 'where', 'which', 'who', 'do', 'does', 'did', 'can', 'could', 'should', 'would', 'will', 'shall', 'may', 'might', 'to', 'of', 'in', 'for', 'on', 'with', 'at', 'by', 'from', 'as', 'into', 'about', 'or', 'and', 'but', 'not', 'it', 'this', 'that', 'these', 'those', 'i', 'me', 'my', 'we', 'our', 'you', 'your', 'he', 'she', 'they', 'them', 'his', 'her', 'their']);
+  const keywords = query.toLowerCase().split(/\s+/).filter(w => !stopWords.has(w) && w.length > 2);
+  if (keywords.length > 1 && keywords.join(' ') !== query.toLowerCase().trim()) {
+    queries.push(keywords.join(' '));
+  }
+
+  return queries;
+}
+
+// ============================================================
+// CONTEXTUAL COMPRESSION — Trim irrelevant parts of results
+// ============================================================
+function compressResult(result: RAGSearchResult, query: string): RAGSearchResult {
+  const content = result.chunk.content;
+  // If the chunk is already small, return as-is
+  if (estimateTokens(content) <= 200) return result;
+
+  // Split into sentences and score each one by keyword overlap
+  const queryTerms = new Set(query.toLowerCase().split(/\s+/).filter(w => w.length > 2));
+  const sentences = content.split(/(?<=[.!?\n])\s+/);
+
+  const scored = sentences.map((s, i) => {
+    const sWords = new Set(s.toLowerCase().split(/\s+/));
+    let overlap = 0;
+    for (const term of queryTerms) {
+      for (const word of sWords) {
+        if (word.includes(term) || term.includes(word)) { overlap++; break; }
+      }
+    }
+    return { sentence: s, score: overlap, index: i };
+  });
+
+  // Keep sentences with any overlap, plus 1 sentence of context around each
+  const keepIndices = new Set<number>();
+  for (const s of scored) {
+    if (s.score > 0) {
+      keepIndices.add(Math.max(0, s.index - 1));
+      keepIndices.add(s.index);
+      keepIndices.add(Math.min(sentences.length - 1, s.index + 1));
+    }
+  }
+
+  // If nothing matched, keep everything
+  if (keepIndices.size === 0) return result;
+
+  const compressed = Array.from(keepIndices)
+    .sort((a, b) => a - b)
+    .map(i => sentences[i])
+    .join(' ');
+
+  return {
+    ...result,
+    chunk: { ...result.chunk, content: compressed },
+  };
+}
+
+// ============================================================
 // INGESTION PIPELINE
 // ============================================================
 export async function ingestDocument(req: RAGIngestRequest): Promise<RAGDocument> {
@@ -147,18 +196,22 @@ export async function ingestDocument(req: RAGIngestRequest): Promise<RAGDocument
     chunkSize: req.chunkSize || ragConfig.defaultChunkSize,
     chunkOverlap: req.chunkOverlap || ragConfig.defaultChunkOverlap,
   });
-
   logger.info(`Document chunked into ${chunks.length} pieces`);
 
-  // 2. Generate embeddings for all chunks
+  // 2. Generate embeddings
   const chunkTexts = chunks.map(c => c.content);
-  const embeddingResponse = await createEmbedding({
-    provider: defaultLLMConfig.provider,
-    model: defaultLLMConfig.embedModel,
-    input: chunkTexts,
-  });
-
-  logger.info(`Generated ${embeddingResponse.embeddings.length} embeddings`);
+  let embeddingResponse;
+  try {
+    embeddingResponse = await createEmbedding({
+      provider: defaultLLMConfig.provider,
+      model: defaultLLMConfig.embedModel,
+      input: chunkTexts,
+    });
+    logger.info(`Generated ${embeddingResponse.embeddings.length} embeddings`);
+  } catch (error: any) {
+    logger.warn(`Embedding generation failed: ${error.message}. Storing without vectors.`);
+    embeddingResponse = null;
+  }
 
   // 3. Store document in PostgreSQL
   const docId = generateId('doc');
@@ -170,10 +223,10 @@ export async function ingestDocument(req: RAGIngestRequest): Promise<RAGDocument
        JSON.stringify(req.metadata || {})]
     );
   } catch (error: any) {
-    logger.warn(`PostgreSQL storage skipped: ${error.message}`);
+    logger.warn(`PostgreSQL document storage skipped: ${error.message}`);
   }
 
-  // 4. Store chunks in PostgreSQL (for BM25 search)
+  // 4. Store chunks in PostgreSQL
   const chunkIds: string[] = [];
   for (let i = 0; i < chunks.length; i++) {
     const chunkId = generateId('chunk');
@@ -186,31 +239,33 @@ export async function ingestDocument(req: RAGIngestRequest): Promise<RAGDocument
          JSON.stringify(chunks[i].metadata)]
       );
     } catch (error: any) {
-      logger.warn(`Chunk PostgreSQL storage skipped: ${error.message}`);
+      logger.warn(`Chunk PG storage skipped: ${error.message}`);
     }
   }
 
   // 5. Store embeddings in ChromaDB
-  try {
-    const collection = await getChromaCollection(req.collection);
-    await collection.add({
-      ids: chunkIds,
-      embeddings: embeddingResponse.embeddings,
-      documents: chunkTexts,
-      metadatas: chunks.map((c, i) => ({
-        documentId: docId,
-        documentTitle: req.title,
-        chunkIndex: i,
-        heading: c.metadata.heading || '',
-        sourceType: req.sourceType,
-      })),
-    });
-    logger.info(`Stored ${chunkIds.length} vectors in ChromaDB`);
-  } catch (error: any) {
-    logger.warn(`ChromaDB storage skipped: ${error.message}`);
+  if (embeddingResponse) {
+    try {
+      const collection = await getChromaCollection(req.collection);
+      await collection.add({
+        ids: chunkIds,
+        embeddings: embeddingResponse.embeddings,
+        documents: chunkTexts,
+        metadatas: chunks.map((c, i) => ({
+          documentId: docId,
+          documentTitle: req.title,
+          chunkIndex: i,
+          heading: c.metadata.heading || '',
+          sourceType: req.sourceType,
+        })),
+      });
+      logger.info(`Stored ${chunkIds.length} vectors in ChromaDB`);
+    } catch (error: any) {
+      logger.warn(`ChromaDB storage skipped: ${error.message}`);
+    }
   }
 
-  const document: RAGDocument = {
+  return {
     id: docId,
     title: req.title,
     sourceUrl: req.sourceUrl,
@@ -220,8 +275,6 @@ export async function ingestDocument(req: RAGIngestRequest): Promise<RAGDocument
     chunkCount: chunks.length,
     createdAt: new Date(),
   };
-
-  return document;
 }
 
 // ============================================================
@@ -322,7 +375,6 @@ function reciprocalRankFusion(
 ): RAGSearchResult[] {
   const scoreMap = new Map<string, { result: RAGSearchResult; rrfScore: number }>();
 
-  // Score vector results
   vectorResults.forEach((result, rank) => {
     const rrfScore = vectorWeight * (1 / (k + rank + 1));
     const existing = scoreMap.get(result.chunk.id);
@@ -333,7 +385,6 @@ function reciprocalRankFusion(
     }
   });
 
-  // Score BM25 results
   bm25Results.forEach((result, rank) => {
     const rrfScore = bm25Weight * (1 / (k + rank + 1));
     const existing = scoreMap.get(result.chunk.id);
@@ -344,7 +395,6 @@ function reciprocalRankFusion(
     }
   });
 
-  // Sort by RRF score
   return Array.from(scoreMap.values())
     .sort((a, b) => b.rrfScore - a.rrfScore)
     .map(({ result, rrfScore }) => ({ ...result, score: rrfScore }));
@@ -353,9 +403,13 @@ function reciprocalRankFusion(
 export async function searchRAG(req: RAGSearchRequest): Promise<RAGSearchResult[]> {
   const topK = req.topK || ragConfig.defaultTopK;
   const searchType = req.searchType || 'hybrid';
-  const retrieveK = topK * 4; // Retrieve more for reranking
+  const retrieveK = Math.min(topK * 4, 50); // Retrieve more for reranking, cap at 50
 
   logger.info(`RAG search: "${req.query}" (type: ${searchType}, topK: ${topK})`);
+
+  // Query expansion
+  const expandedQueries = expandQuery(req.query);
+  logger.info(`Query expanded into ${expandedQueries.length} variants`);
 
   let results: RAGSearchResult[];
 
@@ -364,24 +418,48 @@ export async function searchRAG(req: RAGSearchRequest): Promise<RAGSearchResult[
       results = await vectorSearch(req.query, topK, req.collection);
       break;
 
-    case 'bm25':
-      results = await bm25Search(req.query, topK);
+    case 'bm25': {
+      // Search all expanded queries and merge
+      const allBm25: RAGSearchResult[] = [];
+      for (const q of expandedQueries) {
+        const r = await bm25Search(q, retrieveK);
+        allBm25.push(...r);
+      }
+      // Deduplicate by chunk ID, keeping highest score
+      const dedupe = new Map<string, RAGSearchResult>();
+      for (const r of allBm25) {
+        const existing = dedupe.get(r.chunk.id);
+        if (!existing || r.score > existing.score) dedupe.set(r.chunk.id, r);
+      }
+      results = Array.from(dedupe.values()).sort((a, b) => b.score - a.score);
       break;
+    }
 
     case 'hybrid':
-    default:
-      const [vectorResults, bm25Results] = await Promise.all([
+    default: {
+      // Run vector + BM25 in parallel with expanded queries
+      const [vectorResults, ...bm25Results] = await Promise.all([
         vectorSearch(req.query, retrieveK, req.collection),
-        bm25Search(req.query, retrieveK),
+        ...expandedQueries.map(q => bm25Search(q, retrieveK)),
       ]);
 
-      logger.info(`Hybrid search: ${vectorResults.length} vector + ${bm25Results.length} BM25 results`);
-      results = reciprocalRankFusion(vectorResults, bm25Results);
+      // Merge all BM25 results, deduplicating by chunk ID
+      const mergedBm25 = new Map<string, RAGSearchResult>();
+      for (const results of bm25Results) {
+        for (const r of results) {
+          const existing = mergedBm25.get(r.chunk.id);
+          if (!existing || r.score > existing.score) mergedBm25.set(r.chunk.id, r);
+        }
+      }
+
+      logger.info(`Hybrid search: ${vectorResults.length} vector + ${mergedBm25.size} BM25 results`);
+      results = reciprocalRankFusion(vectorResults, Array.from(mergedBm25.values()));
       break;
+    }
   }
 
-  // Trim to topK
-  results = results.slice(0, topK);
+  // Contextual compression
+  results = results.slice(0, topK).map(r => compressResult(r, req.query));
 
   logger.info(`Returning ${results.length} results`);
   return results;
@@ -413,11 +491,9 @@ export async function listDocuments(): Promise<RAGDocument[]> {
 
 export async function deleteDocument(docId: string): Promise<void> {
   try {
-    // Get chunk IDs for ChromaDB deletion
     const chunksResult = await dbQuery('SELECT id FROM chunks WHERE document_id = $1', [docId]);
     const chunkIds = chunksResult.rows.map((r: any) => r.id);
 
-    // Delete from ChromaDB
     if (chunkIds.length > 0) {
       try {
         const collection = await getChromaCollection();
@@ -427,7 +503,6 @@ export async function deleteDocument(docId: string): Promise<void> {
       }
     }
 
-    // Delete from PostgreSQL
     await dbQuery('DELETE FROM chunks WHERE document_id = $1', [docId]);
     await dbQuery('DELETE FROM documents WHERE id = $1', [docId]);
 

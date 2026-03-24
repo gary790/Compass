@@ -3,11 +3,53 @@ import {
   LLMStreamChunk, LLMMessage, LLMToolDefinition, EmbeddingRequest, EmbeddingResponse
 } from '../types/index.js';
 import { llmApiKeys, MODEL_REGISTRY, getModelConfig } from '../config/index.js';
-import { createLogger, generateId, costTracker } from '../utils/index.js';
+import { createLogger, generateId, costTracker, retry } from '../utils/index.js';
 import { cacheGet, cacheSet } from '../database/redis.js';
 import { createHash } from 'crypto';
 
 const logger = createLogger('LLM-Router');
+
+// ============================================================
+// PROVIDER HEALTH TRACKING
+// ============================================================
+interface ProviderHealth {
+  available: boolean;
+  lastError?: string;
+  lastErrorAt?: number;
+  successCount: number;
+  errorCount: number;
+  avgLatencyMs: number;
+}
+
+const providerHealth: Record<string, ProviderHealth> = {};
+
+function recordSuccess(provider: string, latencyMs: number) {
+  if (!providerHealth[provider]) {
+    providerHealth[provider] = { available: true, successCount: 0, errorCount: 0, avgLatencyMs: 0 };
+  }
+  const h = providerHealth[provider];
+  h.available = true;
+  h.successCount++;
+  h.avgLatencyMs = (h.avgLatencyMs * (h.successCount - 1) + latencyMs) / h.successCount;
+}
+
+function recordError(provider: string, error: string) {
+  if (!providerHealth[provider]) {
+    providerHealth[provider] = { available: true, successCount: 0, errorCount: 0, avgLatencyMs: 0 };
+  }
+  const h = providerHealth[provider];
+  h.errorCount++;
+  h.lastError = error;
+  h.lastErrorAt = Date.now();
+  // Mark unavailable after 3 consecutive errors within 60s
+  if (h.errorCount >= 3 && h.lastErrorAt && Date.now() - h.lastErrorAt < 60_000) {
+    h.available = false;
+  }
+}
+
+export function getProviderHealth(): Record<string, ProviderHealth> {
+  return { ...providerHealth };
+}
 
 // ============================================================
 // PROVIDER ADAPTERS
@@ -71,11 +113,9 @@ async function callAnthropic(req: LLMCompletionRequest): Promise<LLMCompletionRe
   const { default: Anthropic } = await import('@anthropic-ai/sdk');
   const client = new Anthropic({ apiKey: llmApiKeys.anthropic });
 
-  // Extract system message
   const systemMsg = req.messages.find(m => m.role === 'system');
   const otherMsgs = req.messages.filter(m => m.role !== 'system');
 
-  // Convert messages to Anthropic format
   const messages = otherMsgs.map(m => {
     if (m.role === 'tool') {
       return {
@@ -88,15 +128,17 @@ async function callAnthropic(req: LLMCompletionRequest): Promise<LLMCompletionRe
       };
     }
     if (m.role === 'assistant' && m.tool_calls?.length) {
-      return {
-        role: 'assistant' as const,
-        content: m.tool_calls.map(tc => ({
+      const blocks: any[] = [];
+      if (m.content) blocks.push({ type: 'text' as const, text: m.content });
+      for (const tc of m.tool_calls) {
+        blocks.push({
           type: 'tool_use' as const,
           id: tc.id,
           name: tc.function.name,
           input: JSON.parse(tc.function.arguments),
-        })),
-      };
+        });
+      }
+      return { role: 'assistant' as const, content: blocks };
     }
     return { role: m.role as 'user' | 'assistant', content: m.content };
   });
@@ -164,7 +206,6 @@ async function callGoogle(req: LLMCompletionRequest): Promise<LLMCompletionRespo
 
   const model = genAI.getGenerativeModel({ model: req.model });
 
-  // Convert messages to Google format
   const systemInstruction = req.messages.find(m => m.role === 'system')?.content;
   const history = req.messages
     .filter(m => m.role !== 'system')
@@ -188,7 +229,6 @@ async function callGoogle(req: LLMCompletionRequest): Promise<LLMCompletionRespo
   const text = response.text();
   const config = getModelConfig(req.model);
 
-  // Estimate tokens for Google (they don't always return usage)
   const inputTokens = req.messages.reduce((sum, m) => sum + Math.ceil(m.content.length / 4), 0);
   const outputTokens = Math.ceil(text.length / 4);
   const costUSD = config
@@ -210,68 +250,19 @@ async function callGoogle(req: LLMCompletionRequest): Promise<LLMCompletionRespo
 }
 
 async function callGroq(req: LLMCompletionRequest): Promise<LLMCompletionResponse> {
-  // Groq uses OpenAI-compatible API
   const { default: OpenAI } = await import('openai');
-  const client = new OpenAI({
-    apiKey: llmApiKeys.groq,
-    baseURL: 'https://api.groq.com/openai/v1',
-  });
-
-  const params: any = {
-    model: req.model,
-    messages: req.messages.map(m => ({
-      role: m.role,
-      content: m.content,
-      ...(m.tool_calls ? { tool_calls: m.tool_calls } : {}),
-      ...(m.tool_call_id ? { tool_call_id: m.tool_call_id } : {}),
-    })),
-    temperature: req.temperature ?? 0.7,
-    max_tokens: req.maxTokens ?? 4096,
-  };
-
-  if (req.tools?.length) {
-    params.tools = req.tools;
-    params.tool_choice = req.tool_choice || 'auto';
-  }
-
-  const start = Date.now();
-  const response = await client.chat.completions.create(params);
-  const latencyMs = Date.now() - start;
-  const choice = response.choices[0];
-  const config = getModelConfig(req.model);
-
-  const inputTokens = response.usage?.prompt_tokens || 0;
-  const outputTokens = response.usage?.completion_tokens || 0;
-  const costUSD = config
-    ? (inputTokens / 1000) * config.costPer1kInput + (outputTokens / 1000) * config.costPer1kOutput
-    : 0;
-
-  costTracker.addCost(req.model, costUSD);
-
-  return {
-    id: response.id,
-    provider: 'groq',
-    model: req.model,
-    content: choice.message.content,
-    toolCalls: (choice.message.tool_calls || []).map(tc => ({
-      id: tc.id,
-      type: 'function' as const,
-      function: { name: tc.function.name, arguments: tc.function.arguments },
-    })),
-    usage: { inputTokens, outputTokens, totalTokens: inputTokens + outputTokens, costUSD },
-    finishReason: choice.finish_reason === 'tool_calls' ? 'tool_calls' : 'stop',
-    latencyMs,
-  };
+  const client = new OpenAI({ apiKey: llmApiKeys.groq, baseURL: 'https://api.groq.com/openai/v1' });
+  return callOpenAICompatible(client, req, 'groq');
 }
 
 async function callMistral(req: LLMCompletionRequest): Promise<LLMCompletionResponse> {
-  // Mistral also uses OpenAI-compatible API
   const { default: OpenAI } = await import('openai');
-  const client = new OpenAI({
-    apiKey: llmApiKeys.mistral,
-    baseURL: 'https://api.mistral.ai/v1',
-  });
+  const client = new OpenAI({ apiKey: llmApiKeys.mistral, baseURL: 'https://api.mistral.ai/v1' });
+  return callOpenAICompatible(client, req, 'mistral');
+}
 
+// Shared adapter for OpenAI-compatible providers
+async function callOpenAICompatible(client: any, req: LLMCompletionRequest, provider: LLMProvider): Promise<LLMCompletionResponse> {
   const params: any = {
     model: req.model,
     messages: req.messages.map(m => ({
@@ -305,10 +296,10 @@ async function callMistral(req: LLMCompletionRequest): Promise<LLMCompletionResp
 
   return {
     id: response.id,
-    provider: 'mistral',
+    provider,
     model: req.model,
     content: choice.message.content,
-    toolCalls: (choice.message.tool_calls || []).map(tc => ({
+    toolCalls: (choice.message.tool_calls || []).map((tc: any) => ({
       id: tc.id,
       type: 'function' as const,
       function: { name: tc.function.name, arguments: tc.function.arguments },
@@ -325,25 +316,15 @@ async function callOllama(req: LLMCompletionRequest): Promise<LLMCompletionRespo
 
   const body: any = {
     model,
-    messages: req.messages.map(m => ({
-      role: m.role,
-      content: m.content,
-    })),
+    messages: req.messages.map(m => ({ role: m.role, content: m.content })),
     stream: false,
-    options: {
-      temperature: req.temperature ?? 0.7,
-      num_predict: req.maxTokens ?? 4096,
-    },
+    options: { temperature: req.temperature ?? 0.7, num_predict: req.maxTokens ?? 4096 },
   };
 
   if (req.tools?.length) {
     body.tools = req.tools.map(t => ({
       type: 'function',
-      function: {
-        name: t.function.name,
-        description: t.function.description,
-        parameters: t.function.parameters,
-      },
+      function: { name: t.function.name, description: t.function.description, parameters: t.function.parameters },
     }));
   }
 
@@ -391,9 +372,17 @@ async function callOllama(req: LLMCompletionRequest): Promise<LLMCompletionRespo
 // STREAMING PROVIDERS
 // ============================================================
 
-async function* streamOpenAI(req: LLMCompletionRequest): AsyncGenerator<LLMStreamChunk> {
+async function* streamOpenAICompatible(req: LLMCompletionRequest, apiKeyOrClient?: any, baseURL?: string): AsyncGenerator<LLMStreamChunk> {
   const { default: OpenAI } = await import('openai');
-  const client = new OpenAI({ apiKey: llmApiKeys.openai });
+
+  let client: any;
+  if (typeof apiKeyOrClient === 'object' && apiKeyOrClient !== null) {
+    client = apiKeyOrClient;
+  } else {
+    const opts: any = { apiKey: apiKeyOrClient || llmApiKeys.openai };
+    if (baseURL) opts.baseURL = baseURL;
+    client = new OpenAI(opts);
+  }
 
   const params: any = {
     model: req.model,
@@ -457,6 +446,84 @@ async function* streamOpenAI(req: LLMCompletionRequest): AsyncGenerator<LLMStrea
   yield { type: 'done' };
 }
 
+async function* streamAnthropic(req: LLMCompletionRequest): AsyncGenerator<LLMStreamChunk> {
+  const { default: Anthropic } = await import('@anthropic-ai/sdk');
+  const client = new Anthropic({ apiKey: llmApiKeys.anthropic });
+
+  const systemMsg = req.messages.find(m => m.role === 'system');
+  const otherMsgs = req.messages.filter(m => m.role !== 'system');
+
+  const messages = otherMsgs.map(m => {
+    if (m.role === 'tool') {
+      return {
+        role: 'user' as const,
+        content: [{ type: 'tool_result' as const, tool_use_id: m.tool_call_id || '', content: m.content }],
+      };
+    }
+    if (m.role === 'assistant' && m.tool_calls?.length) {
+      const blocks: any[] = [];
+      if (m.content) blocks.push({ type: 'text' as const, text: m.content });
+      for (const tc of m.tool_calls) {
+        blocks.push({ type: 'tool_use' as const, id: tc.id, name: tc.function.name, input: JSON.parse(tc.function.arguments) });
+      }
+      return { role: 'assistant' as const, content: blocks };
+    }
+    return { role: m.role as 'user' | 'assistant', content: m.content };
+  });
+
+  const params: any = {
+    model: req.model,
+    messages,
+    max_tokens: req.maxTokens ?? 4096,
+    temperature: req.temperature ?? 0.7,
+    stream: true,
+  };
+
+  if (systemMsg) params.system = systemMsg.content;
+  if (req.tools?.length) {
+    params.tools = req.tools.map(t => ({
+      name: t.function.name,
+      description: t.function.description,
+      input_schema: t.function.parameters,
+    }));
+  }
+
+  const stream = client.messages.stream(params);
+
+  let inputTokens = 0;
+  let outputTokens = 0;
+
+  for await (const event of stream as any) {
+    if (event.type === 'content_block_delta') {
+      if (event.delta?.type === 'text_delta') {
+        yield { type: 'text_delta', content: event.delta.text };
+      } else if (event.delta?.type === 'input_json_delta') {
+        yield { type: 'tool_call_delta', toolArgs: event.delta.partial_json };
+      }
+    } else if (event.type === 'content_block_start') {
+      if (event.content_block?.type === 'tool_use') {
+        yield { type: 'tool_call_delta', toolCallId: event.content_block.id, toolName: event.content_block.name };
+      }
+    } else if (event.type === 'message_delta') {
+      outputTokens = event.usage?.output_tokens || 0;
+    } else if (event.type === 'message_start') {
+      inputTokens = event.message?.usage?.input_tokens || 0;
+    }
+  }
+
+  const config = getModelConfig(req.model);
+  const costUSD = config
+    ? (inputTokens / 1000) * config.costPer1kInput + (outputTokens / 1000) * config.costPer1kOutput
+    : 0;
+  costTracker.addCost(req.model, costUSD);
+
+  yield {
+    type: 'usage',
+    usage: { inputTokens, outputTokens, totalTokens: inputTokens + outputTokens, costUSD },
+  };
+  yield { type: 'done' };
+}
+
 // ============================================================
 // EMBEDDING FUNCTION
 // ============================================================
@@ -467,10 +534,7 @@ export async function createEmbedding(req: EmbeddingRequest): Promise<EmbeddingR
     const { default: OpenAI } = await import('openai');
     const client = new OpenAI({ apiKey: llmApiKeys.openai });
 
-    const response = await client.embeddings.create({
-      model: req.model,
-      input: inputs,
-    });
+    const response = await client.embeddings.create({ model: req.model, input: inputs });
 
     const config = getModelConfig(req.model);
     const totalTokens = response.usage.total_tokens;
@@ -509,7 +573,7 @@ export async function createEmbedding(req: EmbeddingRequest): Promise<EmbeddingR
 }
 
 // ============================================================
-// MAIN ROUTER — The MoE dispatch function
+// MAIN ROUTER — MoE dispatch with retry and health tracking
 // ============================================================
 const PROVIDER_MAP: Record<LLMProvider, (req: LLMCompletionRequest) => Promise<LLMCompletionResponse>> = {
   openai: callOpenAI,
@@ -523,18 +587,22 @@ const PROVIDER_MAP: Record<LLMProvider, (req: LLMCompletionRequest) => Promise<L
 export async function callLLM(req: LLMCompletionRequest): Promise<LLMCompletionResponse> {
   const provider = req.provider;
 
-  // Check if provider has API key
+  // Validate API key
   if (provider !== 'ollama' && !llmApiKeys[provider]) {
     throw new Error(`No API key configured for ${provider}. Add ${provider.toUpperCase()}_API_KEY to .env`);
   }
 
-  // Check cache for identical requests (non-tool calls only)
+  // Cache check (non-tool calls only)
   if (!req.tools?.length) {
-    const cacheKey = `llm:${createHash('md5').update(JSON.stringify(req)).digest('hex')}`;
-    const cached = await cacheGet(cacheKey);
-    if (cached) {
-      logger.debug(`Cache hit for ${req.model}`);
-      return JSON.parse(cached);
+    try {
+      const cacheKey = `llm:${createHash('md5').update(JSON.stringify(req)).digest('hex')}`;
+      const cached = await cacheGet(cacheKey);
+      if (cached) {
+        logger.debug(`Cache hit for ${req.model}`);
+        return JSON.parse(cached);
+      }
+    } catch {
+      // Cache miss or Redis unavailable — continue
     }
   }
 
@@ -548,12 +616,24 @@ export async function callLLM(req: LLMCompletionRequest): Promise<LLMCompletionR
     throw new Error(`Unknown LLM provider: ${provider}`);
   }
 
-  const response = await callFn(req);
+  // Execute with retry (max 2 attempts for transient errors)
+  const response = await retry(
+    () => callFn(req),
+    2,     // maxRetries
+    1000,  // initial delay
+    2      // backoff factor
+  );
+
+  recordSuccess(provider, response.latencyMs);
 
   // Cache non-tool responses for 1 hour
   if (!req.tools?.length && response.content) {
-    const cacheKey = `llm:${createHash('md5').update(JSON.stringify(req)).digest('hex')}`;
-    await cacheSet(cacheKey, JSON.stringify(response), 3600);
+    try {
+      const cacheKey = `llm:${createHash('md5').update(JSON.stringify(req)).digest('hex')}`;
+      await cacheSet(cacheKey, JSON.stringify(response), 3600);
+    } catch {
+      // Redis unavailable — skip caching
+    }
   }
 
   logger.info(`${provider}/${req.model} responded`, {
@@ -567,20 +647,27 @@ export async function callLLM(req: LLMCompletionRequest): Promise<LLMCompletionR
 }
 
 // ============================================================
-// STREAMING ROUTER
+// STREAMING ROUTER — supports OpenAI, Anthropic, Groq, Mistral
 // ============================================================
 export async function* streamLLM(req: LLMCompletionRequest): AsyncGenerator<LLMStreamChunk> {
-  if (req.provider === 'openai' || req.provider === 'groq' || req.provider === 'mistral') {
-    // All OpenAI-compatible providers
-    yield* streamOpenAI({
-      ...req,
-      ...(req.provider === 'groq' ? {} : {}),
-    });
+  const provider = req.provider;
+
+  if (provider === 'openai') {
+    yield* streamOpenAICompatible(req, llmApiKeys.openai);
+  } else if (provider === 'groq') {
+    const { default: OpenAI } = await import('openai');
+    const client = new OpenAI({ apiKey: llmApiKeys.groq, baseURL: 'https://api.groq.com/openai/v1' });
+    yield* streamOpenAICompatible(req, client);
+  } else if (provider === 'mistral') {
+    const { default: OpenAI } = await import('openai');
+    const client = new OpenAI({ apiKey: llmApiKeys.mistral, baseURL: 'https://api.mistral.ai/v1' });
+    yield* streamOpenAICompatible(req, client);
+  } else if (provider === 'anthropic') {
+    yield* streamAnthropic(req);
   } else {
-    // For providers without native streaming, simulate it
+    // Simulate streaming for providers without native support
     const response = await callLLM(req);
     if (response.content) {
-      // Simulate streaming by chunking the response
       const words = response.content.split(' ');
       for (const word of words) {
         yield { type: 'text_delta', content: word + ' ' };
@@ -588,18 +675,10 @@ export async function* streamLLM(req: LLMCompletionRequest): AsyncGenerator<LLMS
     }
     if (response.toolCalls.length > 0) {
       for (const tc of response.toolCalls) {
-        yield {
-          type: 'tool_call_delta',
-          toolCallId: tc.id,
-          toolName: tc.function.name,
-          toolArgs: tc.function.arguments,
-        };
+        yield { type: 'tool_call_delta', toolCallId: tc.id, toolName: tc.function.name, toolArgs: tc.function.arguments };
       }
     }
-    yield {
-      type: 'usage',
-      usage: response.usage,
-    };
+    yield { type: 'usage', usage: response.usage };
     yield { type: 'done' };
   }
 }
