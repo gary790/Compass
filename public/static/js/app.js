@@ -1,5 +1,5 @@
 // ============================================================
-// AGENTIC RAG PLATFORM — Frontend v1.2 (Light Theme)
+// AGENTIC RAG PLATFORM — Frontend v1.8 (Full Performance)
 // Layout: Narrow sidebar | Chat pane | Workspace pane
 // ============================================================
 
@@ -763,13 +763,10 @@ function switchWorkspaceTab(tab) {
 
   // Show/hide panels using style.display
   WS_PANELS.forEach(p => {
-    const el = document.getElementById(`wspanel-${p}`);
+    const el = document.getElementById('wspanel-' + p);
     if (!el) return;
     if (p === tab) {
-      // Terminal needs flex layout, others block/flex
       el.style.display = (p === 'terminal') ? 'flex' : '';
-      el.style.display = el.style.display || ''; // reset to CSS default
-      // For non-terminal panels, just remove display:none
       if (p !== 'terminal') el.style.display = '';
     } else {
       el.style.display = 'none';
@@ -779,34 +776,146 @@ function switchWorkspaceTab(tab) {
   // Load data on switch
   if (tab === 'explorer') refreshFileTree();
   if (tab === 'metrics') loadMetrics();
+  if (tab === 'deploy') loadDeployStatus();
+  if (tab === 'github') loadGitStatus();
+  if (tab === 'terminal') {
+    var ti = document.getElementById('terminalInput');
+    if (ti) ti.focus();
+    var tw = document.getElementById('terminalWorkspace');
+    if (tw) tw.textContent = currentWorkspace || 'default';
+  }
 }
+
+let _latencyChart = null;
+let _costChart = null;
 
 async function loadMetrics() {
   try {
-    const res = await fetch('/api/system/status');
-    const data = await res.json();
-    if (data.success) {
-      const d = data.data;
-      const grid = document.getElementById('metricsGrid');
-      const placeholder = document.getElementById('metricsPlaceholder');
-      if (placeholder) placeholder.style.display = 'none';
+    var [statusRes, costsRes, perfRes, healthRes] = await Promise.all([
+      fetch('/api/system/status'),
+      fetch('/api/system/costs'),
+      fetch('/api/system/performance'),
+      fetch('/api/system/health/providers'),
+    ]);
+    var statusData = await statusRes.json();
+    var costsData = await costsRes.json();
+    var perfData = await perfRes.json();
+    var healthData = await healthRes.json();
+
+    var d = statusData.data;
+    var costs = costsData.data;
+    var perf = perfData.data;
+    var health = healthData.data;
+
+    // Update refresh time
+    var refreshEl = document.getElementById('metricsRefreshTime');
+    if (refreshEl) refreshEl.textContent = 'Updated: ' + new Date().toLocaleTimeString();
+
+    // Top cards: 4 key metrics
+    var topCards = document.getElementById('metricsTopCards');
+    if (topCards) {
+      topCards.innerHTML = [
+        { label: 'Total Tokens', value: (costs.totalTokens || totalTokens).toLocaleString(), icon: 'fa-coins', color: 'text-purple-600', bg: 'bg-purple-50' },
+        { label: 'Session Cost', value: '$' + (costs.sessionTotal || totalCost).toFixed(4), icon: 'fa-dollar-sign', color: 'text-green-600', bg: 'bg-green-50' },
+        { label: 'LLM Requests', value: costs.totalRequests || 0, icon: 'fa-bolt', color: 'text-blue-600', bg: 'bg-blue-50' },
+        { label: 'Avg Latency', value: (perf.avgLatencyMs || 0) + 'ms', icon: 'fa-clock', color: 'text-orange-600', bg: 'bg-orange-50' },
+      ].map(function(m) {
+        return '<div class="' + m.bg + ' rounded-xl p-3 border border-gray-200">' +
+          '<div class="flex items-center gap-2 mb-1"><i class="fas ' + m.icon + ' ' + m.color + '" style="font-size:10px"></i><span class="text-[10px] text-gray-400 uppercase">' + m.label + '</span></div>' +
+          '<div class="text-xl font-bold ' + m.color + '">' + m.value + '</div></div>';
+      }).join('');
+    }
+
+    // Secondary grid
+    var grid = document.getElementById('metricsGrid');
+    if (grid) {
       grid.innerHTML = [
         { label: 'Status', value: d.status, color: 'text-green-600' },
-        { label: 'Version', value: d.version || '1.1.0', color: 'text-indigo-600' },
+        { label: 'Version', value: d.version, color: 'text-indigo-600' },
         { label: 'Tools', value: d.toolCount, color: 'text-blue-600' },
-        { label: 'Memory', value: d.memory.used, color: 'text-yellow-600' },
+        { label: 'Memory', value: d.memory.used + ' (' + d.memory.heapUsedPercent + '%)', color: 'text-yellow-600' },
         { label: 'Uptime', value: Math.floor(d.uptime / 60) + ' min', color: 'text-gray-700' },
         { label: 'Database', value: d.database, color: d.database === 'connected' ? 'text-green-600' : 'text-red-500' },
-        { label: 'Session Tokens', value: totalTokens.toLocaleString(), color: 'text-purple-600' },
-        { label: 'Session Cost', value: '$' + totalCost.toFixed(4), color: 'text-orange-600' },
-      ].map(m => `
-        <div class="bg-gray-50 rounded-xl p-4 border border-gray-200">
-          <div class="text-xs text-gray-400 mb-1">${m.label}</div>
-          <div class="text-lg font-bold ${m.color}">${m.value}</div>
-        </div>`).join('');
+        { label: 'WS Clients', value: d.websocket.connectedClients, color: 'text-indigo-600' },
+        { label: 'P95 Latency', value: (perf.p95LatencyMs || 0) + 'ms', color: 'text-orange-600' },
+      ].map(function(m) {
+        return '<div class="bg-gray-50 rounded-xl p-3 border border-gray-200">' +
+          '<div class="text-[10px] text-gray-400 mb-0.5">' + m.label + '</div>' +
+          '<div class="text-sm font-bold ' + m.color + '">' + m.value + '</div></div>';
+      }).join('');
     }
-  } catch {
-    document.getElementById('metricsGrid').innerHTML = '<div class="col-span-2 text-center text-xs text-red-400 py-4">Could not load metrics</div>';
+
+    // Latency chart
+    var latencyCtx = document.getElementById('latencyChart');
+    if (latencyCtx && perf.recentLatencies && perf.recentLatencies.length > 0) {
+      if (_latencyChart) _latencyChart.destroy();
+      _latencyChart = new Chart(latencyCtx, {
+        type: 'line',
+        data: {
+          labels: perf.recentLatencies.map(function(_, i) { return i + 1; }),
+          datasets: [{ label: 'Latency (ms)', data: perf.recentLatencies, borderColor: '#6366f1', backgroundColor: 'rgba(99,102,241,0.1)', fill: true, tension: 0.4, pointRadius: 2 }]
+        },
+        options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } }, scales: { y: { beginAtZero: true, ticks: { font: { size: 10 } } }, x: { ticks: { font: { size: 9 } } } } }
+      });
+    }
+
+    // Cost chart (per model)
+    var costCtx = document.getElementById('costChart');
+    if (costCtx && costs.models) {
+      if (_costChart) _costChart.destroy();
+      var modelNames = Object.keys(costs.models);
+      var modelCosts = modelNames.map(function(m) { return costs.models[m].cost; });
+      var bgColors = ['#6366f1', '#8b5cf6', '#ec4899', '#f97316', '#22c55e', '#3b82f6', '#14b8a6'];
+      _costChart = new Chart(costCtx, {
+        type: 'doughnut',
+        data: {
+          labels: modelNames,
+          datasets: [{ data: modelCosts, backgroundColor: bgColors.slice(0, modelNames.length) }]
+        },
+        options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { position: 'right', labels: { font: { size: 10 }, boxWidth: 12 } } } }
+      });
+    }
+
+    // Tool stats
+    var toolStatsEl = document.getElementById('toolStatsGrid');
+    if (toolStatsEl && perf.toolStats) {
+      var entries = Object.entries(perf.toolStats).sort(function(a, b) { return b[1].totalCalls - a[1].totalCalls; }).slice(0, 12);
+      if (entries.length > 0) {
+        toolStatsEl.innerHTML = entries.map(function(entry) {
+          var name = entry[0];
+          var s = entry[1];
+          var rateColor = s.successRate >= 90 ? 'text-green-600' : s.successRate >= 70 ? 'text-yellow-600' : 'text-red-600';
+          return '<div class="bg-gray-50 rounded-lg p-2 border border-gray-100">' +
+            '<div class="flex items-center justify-between mb-1"><span class="text-xs font-medium text-gray-700 truncate">' + name + '</span><span class="text-[10px] ' + rateColor + ' font-semibold">' + s.successRate + '%</span></div>' +
+            '<div class="flex items-center gap-2 text-[10px] text-gray-400"><span>' + s.totalCalls + ' calls</span><span>' + s.avgDurationMs + 'ms avg</span></div></div>';
+        }).join('');
+      } else {
+        toolStatsEl.innerHTML = '<div class="col-span-2 text-xs text-gray-400 text-center py-2">No tool calls yet</div>';
+      }
+    }
+
+    // Provider health
+    var providerEl = document.getElementById('providerHealthGrid');
+    if (providerEl && health) {
+      var providers = Object.keys(health);
+      if (providers.length > 0) {
+        providerEl.innerHTML = providers.map(function(p) {
+          var h = health[p];
+          var statusColor = h.available ? 'bg-green-500' : 'bg-red-500';
+          var statusText = h.available ? 'Healthy' : 'Degraded';
+          return '<div class="bg-gray-50 rounded-lg p-2 border border-gray-100">' +
+            '<div class="flex items-center gap-2 mb-1"><div class="w-2 h-2 rounded-full ' + statusColor + '"></div>' +
+            '<span class="text-xs font-medium text-gray-700">' + p + '</span><span class="text-[10px] text-gray-400 ml-auto">' + statusText + '</span></div>' +
+            '<div class="flex items-center gap-2 text-[10px] text-gray-400"><span>' + h.successCount + ' ok</span><span>' + h.errorCount + ' err</span>' +
+            (h.avgLatencyMs ? '<span>' + Math.round(h.avgLatencyMs) + 'ms</span>' : '') + '</div></div>';
+        }).join('');
+      } else {
+        providerEl.innerHTML = '<div class="col-span-2 text-xs text-gray-400 text-center py-2">No provider calls yet</div>';
+      }
+    }
+  } catch (err) {
+    var grid2 = document.getElementById('metricsGrid');
+    if (grid2) grid2.innerHTML = '<div class="col-span-2 text-center text-xs text-red-400 py-4">Could not load metrics: ' + err.message + '</div>';
   }
 }
 
@@ -1496,20 +1605,181 @@ async function deleteRAGDoc(id) {
 }
 
 // ============================================================
-// TERMINAL
+// TERMINAL — Direct command execution via API
 // ============================================================
-function executeTerminalCmd() {
-  const input = document.getElementById('terminalInput');
-  const cmd = input.value.trim();
+var _termHistory = [];
+var _termHistoryIdx = -1;
+
+async function executeTerminalCmd() {
+  var input = document.getElementById('terminalInput');
+  var cmd = input.value.trim();
   if (!cmd) return;
-  document.getElementById('terminalOutput').innerHTML += `<div class="text-green-400">$ ${escapeHtml(cmd)}</div>`;
+  
+  // Store in history
+  _termHistory.unshift(cmd);
+  if (_termHistory.length > 50) _termHistory.pop();
+  _termHistoryIdx = -1;
   input.value = '';
-  sendQuickAction(`Run this command in the workspace: ${cmd}`);
+
+  var output = document.getElementById('terminalOutput');
+  output.innerHTML += '<div class="text-green-400">$ ' + escapeHtml(cmd) + '</div>';
+  output.innerHTML += '<div class="text-gray-500 term-loading"><i class="fas fa-spinner fa-spin"></i> Running...</div>';
+  output.scrollTop = output.scrollHeight;
+
+  try {
+    var resp = await fetch('/api/system/terminal/exec', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ command: cmd, workspaceId: currentWorkspace || 'default' }),
+    });
+    var data = await resp.json();
+    // Remove loading indicator
+    var loading = output.querySelector('.term-loading');
+    if (loading) loading.remove();
+
+    if (data.success && data.data) {
+      var d = data.data;
+      if (d.output) {
+        output.innerHTML += '<div class="text-gray-300 whitespace-pre-wrap">' + escapeHtml(d.output) + '</div>';
+      }
+      if (d.stderr) {
+        output.innerHTML += '<div class="text-red-400 whitespace-pre-wrap">' + escapeHtml(d.stderr) + '</div>';
+      }
+      if (d.exitCode !== 0) {
+        output.innerHTML += '<div class="text-red-400">Exit code: ' + d.exitCode + '</div>';
+      }
+    } else {
+      output.innerHTML += '<div class="text-red-400">Error: ' + (data.error ? data.error.message : 'Unknown error') + '</div>';
+    }
+  } catch (err) {
+    var loading2 = output.querySelector('.term-loading');
+    if (loading2) loading2.remove();
+    output.innerHTML += '<div class="text-red-400">Error: ' + err.message + '</div>';
+  }
+  output.scrollTop = output.scrollHeight;
 }
+
+function clearTerminal() {
+  var output = document.getElementById('terminalOutput');
+  output.innerHTML = '<div class="text-gray-500">Terminal cleared.</div>';
+}
+
+// Terminal history navigation
+document.addEventListener('keydown', function(e) {
+  var input = document.getElementById('terminalInput');
+  if (document.activeElement !== input) return;
+  if (e.key === 'ArrowUp') {
+    e.preventDefault();
+    _termHistoryIdx = Math.min(_termHistoryIdx + 1, _termHistory.length - 1);
+    if (_termHistory[_termHistoryIdx]) input.value = _termHistory[_termHistoryIdx];
+  } else if (e.key === 'ArrowDown') {
+    e.preventDefault();
+    _termHistoryIdx = Math.max(_termHistoryIdx - 1, -1);
+    input.value = _termHistoryIdx >= 0 ? _termHistory[_termHistoryIdx] : '';
+  }
+});
 
 // ============================================================
 // SETTINGS
 // ============================================================
+// ============================================================
+// DEPLOY STATUS
+// ============================================================
+async function loadDeployStatus() {
+  try {
+    var resp = await fetch('/api/system/deploy/status');
+    var data = await resp.json();
+    if (!data.success) return;
+    var histEl = document.getElementById('deployHistory');
+    if (!histEl) return;
+    var deps = data.data.deployments || [];
+    if (deps.length === 0) {
+      histEl.innerHTML = '<div class="text-xs text-gray-400 text-center py-4"><i class="fas fa-rocket text-gray-300 text-2xl mb-2 block"></i>No deployments yet. Deploy your workspace to see history.</div>';
+      return;
+    }
+    histEl.innerHTML = deps.map(function(d) {
+      var statusColors = { deployed: 'bg-green-500', building: 'bg-yellow-500', pending: 'bg-blue-500', failed: 'bg-red-500' };
+      var dot = statusColors[d.status] || 'bg-gray-400';
+      var time = new Date(d.timestamp).toLocaleString();
+      return '<div class="flex items-center gap-2 p-2 bg-gray-50 rounded-lg border border-gray-100">' +
+        '<div class="w-2 h-2 rounded-full ' + dot + ' shrink-0"></div>' +
+        '<div class="flex-1 min-w-0"><div class="text-xs font-medium text-gray-700">' + (d.platform || 'unknown') + '</div>' +
+        '<div class="text-[10px] text-gray-400">' + time + (d.url ? ' · <a href="' + d.url + '" target="_blank" class="text-indigo-500 hover:underline">' + d.url + '</a>' : '') + '</div></div>' +
+        '<span class="text-[10px] px-1.5 py-0.5 rounded-full bg-gray-100 text-gray-500">' + d.status + '</span></div>';
+    }).join('');
+  } catch (err) {
+    var histEl2 = document.getElementById('deployHistory');
+    if (histEl2) histEl2.innerHTML = '<div class="text-xs text-gray-400 text-center py-2">Could not load deploy status</div>';
+  }
+}
+
+// ============================================================
+// GIT STATUS
+// ============================================================
+async function loadGitStatus() {
+  try {
+    var resp = await fetch('/api/system/git/status?workspaceId=' + encodeURIComponent(currentWorkspace || 'default'));
+    var data = await resp.json();
+    if (!data.success) return;
+    var d = data.data;
+
+    // Status dot
+    var dotEl = document.getElementById('gitStatusDot');
+    if (dotEl) dotEl.className = 'w-2 h-2 rounded-full ' + (d.isGitRepo ? (d.isClean ? 'bg-green-500' : 'bg-yellow-500') : 'bg-gray-300');
+
+    // Branch name
+    var branchEl = document.getElementById('gitBranchName');
+    if (branchEl) branchEl.textContent = d.isGitRepo ? (d.branch || 'detached') : 'Not a git repo';
+
+    // Clean badge
+    var cleanEl = document.getElementById('gitCleanBadge');
+    if (cleanEl) {
+      if (d.isGitRepo) {
+        cleanEl.textContent = d.isClean ? 'Clean' : d.changedFileCount + ' changed';
+        cleanEl.className = 'text-[10px] px-1.5 py-0.5 rounded-full ' + (d.isClean ? 'bg-green-50 text-green-600' : 'bg-yellow-50 text-yellow-600');
+      } else {
+        cleanEl.textContent = 'No git';
+        cleanEl.className = 'text-[10px] px-1.5 py-0.5 rounded-full bg-gray-100 text-gray-500';
+      }
+    }
+
+    // Remote URL
+    var remoteEl = document.getElementById('gitRemoteUrl');
+    if (remoteEl) remoteEl.textContent = d.remoteUrl || 'No remote configured';
+
+    // Changed files
+    var changedEl = document.getElementById('gitChangedFiles');
+    if (changedEl) {
+      if (d.changes && d.changes.length > 0) {
+        changedEl.innerHTML = d.changes.slice(0, 8).map(function(ch) {
+          var statusColors = { M: 'text-yellow-500', A: 'text-green-500', D: 'text-red-500', '??': 'text-blue-500' };
+          var color = statusColors[ch.status] || 'text-gray-400';
+          return '<div class="flex items-center gap-1"><span class="font-mono ' + color + ' w-4">' + ch.status + '</span><span class="text-gray-600 truncate">' + ch.file + '</span></div>';
+        }).join('') + (d.changes.length > 8 ? '<div class="text-gray-400">... and ' + (d.changes.length - 8) + ' more</div>' : '');
+      } else {
+        changedEl.innerHTML = '';
+      }
+    }
+
+    // Commit history
+    var histEl = document.getElementById('gitCommitHistory');
+    if (histEl) {
+      if (d.commits && d.commits.length > 0) {
+        histEl.innerHTML = d.commits.map(function(c) {
+          return '<div class="flex items-center gap-2 py-1 border-b border-gray-50 last:border-0">' +
+            '<span class="text-[10px] font-mono text-indigo-500 shrink-0">' + c.hash + '</span>' +
+            '<span class="text-xs text-gray-600 truncate">' + escapeHtml(c.message) + '</span></div>';
+        }).join('');
+      } else {
+        histEl.innerHTML = '<div class="text-xs text-gray-400 text-center py-2">No commits</div>';
+      }
+    }
+  } catch (err) {
+    var histEl2 = document.getElementById('gitCommitHistory');
+    if (histEl2) histEl2.innerHTML = '<div class="text-xs text-red-400 text-center py-2">Failed to load git status</div>';
+  }
+}
+
 function showSettings() { document.getElementById('settingsModal').style.display = 'flex'; loadSystemInfo(); }
 function hideSettings() { document.getElementById('settingsModal').style.display = 'none'; }
 
@@ -1522,7 +1792,7 @@ async function loadSystemInfo() {
       document.getElementById('systemInfo').innerHTML = `
         <div class="space-y-1.5">
           <div>Status: <span class="text-green-600 font-semibold">${d.status}</span></div>
-          <div>Version: <span class="text-indigo-600">${d.version || '1.1.0'}</span></div>
+          <div>Version: <span class="text-indigo-600">${d.version || '1.8.0'}</span></div>
           <div>Database: <span class="${d.database==='connected'?'text-green-600':'text-red-500'}">${d.database}</span></div>
           <div>LLM Providers: <span class="text-indigo-600">${d.llmProviders.join(', ')}</span></div>
           <div>Tools: <span class="text-indigo-600">${d.toolCount}</span></div>

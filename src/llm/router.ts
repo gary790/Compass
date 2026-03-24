@@ -3,7 +3,7 @@ import {
   LLMStreamChunk, LLMMessage, LLMToolDefinition, EmbeddingRequest, EmbeddingResponse
 } from '../types/index.js';
 import { llmApiKeys, MODEL_REGISTRY, getModelConfig } from '../config/index.js';
-import { createLogger, generateId, costTracker, retry } from '../utils/index.js';
+import { createLogger, generateId, costTracker, performanceTracker, retry } from '../utils/index.js';
 import { cacheGet, cacheSet } from '../database/redis.js';
 import { createHash } from 'crypto';
 
@@ -91,7 +91,7 @@ async function callOpenAI(req: LLMCompletionRequest): Promise<LLMCompletionRespo
     ? (inputTokens / 1000) * config.costPer1kInput + (outputTokens / 1000) * config.costPer1kOutput
     : 0;
 
-  costTracker.addCost(req.model, costUSD);
+  costTracker.addCost(req.model, costUSD, inputTokens, outputTokens, latencyMs);
 
   return {
     id: response.id,
@@ -171,7 +171,7 @@ async function callAnthropic(req: LLMCompletionRequest): Promise<LLMCompletionRe
     ? (inputTokens / 1000) * config.costPer1kInput + (outputTokens / 1000) * config.costPer1kOutput
     : 0;
 
-  costTracker.addCost(req.model, costUSD);
+  costTracker.addCost(req.model, costUSD, inputTokens, outputTokens, latencyMs);
 
   let content: string | null = null;
   const toolCalls: LLMCompletionResponse['toolCalls'] = [];
@@ -235,7 +235,7 @@ async function callGoogle(req: LLMCompletionRequest): Promise<LLMCompletionRespo
     ? (inputTokens / 1000) * config.costPer1kInput + (outputTokens / 1000) * config.costPer1kOutput
     : 0;
 
-  costTracker.addCost(req.model, costUSD);
+  costTracker.addCost(req.model, costUSD, inputTokens, outputTokens, latencyMs);
 
   return {
     id: generateId('google'),
@@ -292,7 +292,7 @@ async function callOpenAICompatible(client: any, req: LLMCompletionRequest, prov
     ? (inputTokens / 1000) * config.costPer1kInput + (outputTokens / 1000) * config.costPer1kOutput
     : 0;
 
-  costTracker.addCost(req.model, costUSD);
+  costTracker.addCost(req.model, costUSD, inputTokens, outputTokens, latencyMs);
 
   return {
     id: response.id,

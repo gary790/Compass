@@ -4,7 +4,7 @@ import { logger as honoLogger } from 'hono/logger';
 import { serve } from '@hono/node-server';
 import { serveStatic } from '@hono/node-server/serve-static';
 import { serverConfig } from './config/index.js';
-import { createLogger } from './utils/index.js';
+import { createLogger, performanceTracker } from './utils/index.js';
 import { initializeTools } from './tools/index.js';
 import { testConnection } from './database/client.js';
 import { connectRedis } from './database/redis.js';
@@ -79,7 +79,7 @@ app.route('/api/sandbox', sandboxRoutes);
 app.get('/api/health', (c) => {
   return c.json({
     status: 'ok',
-    version: '1.7.0',
+    version: '1.8.0',
     sandbox: {
       dockerAvailable: sandboxManager.isDockerAvailable(),
       runningContainers: sandboxManager.getRunningCount(),
@@ -139,14 +139,14 @@ app.get('*', async (c) => {
 // ============================================================
 async function startup() {
   console.log('');
-  console.log('  Agentic RAG Platform v1.7.0 — Sandbox Isolation');
+  console.log('  Agentic RAG Platform v1.8.0 — Full Performance');
   console.log('  Starting up...');
   console.log('');
 
   logger.info('╔══════════════════════════════════════╗');
-  logger.info('║   Agentic RAG Platform v1.7.0       ║');
-  logger.info('║   MoE · Hybrid RAG · 55+ Tools      ║');
-  logger.info('║   Sandbox Isolation · Docker         ║');
+  logger.info('║   Agentic RAG Platform v1.8.0       ║');
+  logger.info('║   MoE · Hybrid RAG · 60 Tools        ║');
+  logger.info('║   Full Performance · Metrics          ║');
   logger.info('╚══════════════════════════════════════╝');
   logger.info('');
 
@@ -229,7 +229,7 @@ function generateFallbackHTML(): string {
 .card{background:#16213e;padding:40px;border-radius:12px;text-align:center;max-width:500px}
 h1{color:#e94560}a{color:#74b9ff}</style></head>
 <body><div class="card">
-<h1>Agentic RAG Platform v1.1.0</h1>
+<h1>Agentic RAG Platform v1.8.0</h1>
 <p>The dashboard will appear once the frontend is loaded.</p>
 <p>API: <a href="/api/health">/api/health</a></p>
 <p>Status: <a href="/api/system/status">/api/system/status</a></p>

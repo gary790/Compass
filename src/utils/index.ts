@@ -186,20 +186,43 @@ export function decrypt(encryptedText: string, secretKey: string): string {
 }
 
 // ============================================================
-// COST TRACKER
+// COST TRACKER — Enhanced with detailed per-model breakdown
 // ============================================================
-class CostTracker {
-  private costs: Map<string, number> = new Map();
-  private sessionTotal: number = 0;
+interface ModelUsage {
+  cost: number;
+  inputTokens: number;
+  outputTokens: number;
+  requestCount: number;
+  avgLatencyMs: number;
+  lastUsedAt: number;
+}
 
-  addCost(model: string, cost: number) {
-    const current = this.costs.get(model) || 0;
-    this.costs.set(model, current + cost);
+class CostTracker {
+  private models: Map<string, ModelUsage> = new Map();
+  private sessionTotal: number = 0;
+  private sessionStartedAt: number = Date.now();
+  private totalInputTokens: number = 0;
+  private totalOutputTokens: number = 0;
+  private totalRequests: number = 0;
+
+  addCost(model: string, cost: number, inputTokens: number = 0, outputTokens: number = 0, latencyMs: number = 0) {
+    const existing = this.models.get(model) || { cost: 0, inputTokens: 0, outputTokens: 0, requestCount: 0, avgLatencyMs: 0, lastUsedAt: 0 };
+    existing.cost += cost;
+    existing.inputTokens += inputTokens;
+    existing.outputTokens += outputTokens;
+    existing.requestCount++;
+    existing.avgLatencyMs = (existing.avgLatencyMs * (existing.requestCount - 1) + latencyMs) / existing.requestCount;
+    existing.lastUsedAt = Date.now();
+    this.models.set(model, existing);
+
     this.sessionTotal += cost;
+    this.totalInputTokens += inputTokens;
+    this.totalOutputTokens += outputTokens;
+    this.totalRequests++;
   }
 
   getModelCost(model: string): number {
-    return this.costs.get(model) || 0;
+    return this.models.get(model)?.cost || 0;
   }
 
   getSessionTotal(): number {
@@ -208,17 +231,140 @@ class CostTracker {
 
   getSummary(): Record<string, number> {
     const summary: Record<string, number> = {};
-    this.costs.forEach((cost, model) => {
-      summary[model] = Math.round(cost * 1000000) / 1000000;
+    this.models.forEach((usage, model) => {
+      summary[model] = Math.round(usage.cost * 1000000) / 1000000;
     });
     summary['total'] = Math.round(this.sessionTotal * 1000000) / 1000000;
     return summary;
   }
 
+  getDetailedSummary() {
+    const models: Record<string, any> = {};
+    this.models.forEach((usage, model) => {
+      models[model] = {
+        cost: Math.round(usage.cost * 1000000) / 1000000,
+        inputTokens: usage.inputTokens,
+        outputTokens: usage.outputTokens,
+        totalTokens: usage.inputTokens + usage.outputTokens,
+        requestCount: usage.requestCount,
+        avgLatencyMs: Math.round(usage.avgLatencyMs),
+        lastUsedAt: new Date(usage.lastUsedAt).toISOString(),
+      };
+    });
+    return {
+      sessionTotal: Math.round(this.sessionTotal * 1000000) / 1000000,
+      totalInputTokens: this.totalInputTokens,
+      totalOutputTokens: this.totalOutputTokens,
+      totalTokens: this.totalInputTokens + this.totalOutputTokens,
+      totalRequests: this.totalRequests,
+      sessionDurationMin: Math.round((Date.now() - this.sessionStartedAt) / 60000 * 10) / 10,
+      sessionStartedAt: new Date(this.sessionStartedAt).toISOString(),
+      models,
+      total: Math.round(this.sessionTotal * 1000000) / 1000000,
+    };
+  }
+
   reset() {
-    this.costs.clear();
+    this.models.clear();
     this.sessionTotal = 0;
+    this.totalInputTokens = 0;
+    this.totalOutputTokens = 0;
+    this.totalRequests = 0;
+    this.sessionStartedAt = Date.now();
   }
 }
 
 export const costTracker = new CostTracker();
+
+// ============================================================
+// PERFORMANCE TRACKER — Request timing, tool execution metrics
+// ============================================================
+interface ToolMetric {
+  name: string;
+  totalCalls: number;
+  successCount: number;
+  failureCount: number;
+  avgDurationMs: number;
+  maxDurationMs: number;
+  lastCalledAt: number;
+}
+
+interface DeploymentRecord {
+  id: string;
+  platform: string;
+  status: 'pending' | 'building' | 'deployed' | 'failed';
+  url?: string;
+  timestamp: number;
+  duration?: number;
+  error?: string;
+}
+
+class PerformanceTracker {
+  private requestCount: number = 0;
+  private totalRequestDurationMs: number = 0;
+  private toolMetrics: Map<string, ToolMetric> = new Map();
+  private recentLatencies: number[] = [];
+  private deployments: DeploymentRecord[] = [];
+  private maxLatencyHistory = 100;
+  private startedAt: number = Date.now();
+
+  recordRequest(durationMs: number) {
+    this.requestCount++;
+    this.totalRequestDurationMs += durationMs;
+    this.recentLatencies.push(durationMs);
+    if (this.recentLatencies.length > this.maxLatencyHistory) {
+      this.recentLatencies.shift();
+    }
+  }
+
+  recordToolExecution(name: string, durationMs: number, success: boolean) {
+    const existing = this.toolMetrics.get(name) || { name, totalCalls: 0, successCount: 0, failureCount: 0, avgDurationMs: 0, maxDurationMs: 0, lastCalledAt: 0 };
+    existing.totalCalls++;
+    if (success) existing.successCount++;
+    else existing.failureCount++;
+    existing.avgDurationMs = (existing.avgDurationMs * (existing.totalCalls - 1) + durationMs) / existing.totalCalls;
+    existing.maxDurationMs = Math.max(existing.maxDurationMs, durationMs);
+    existing.lastCalledAt = Date.now();
+    this.toolMetrics.set(name, existing);
+  }
+
+  addDeployment(record: DeploymentRecord) {
+    this.deployments.unshift(record);
+    if (this.deployments.length > 50) this.deployments.pop();
+  }
+
+  getDeployments(): DeploymentRecord[] {
+    return [...this.deployments];
+  }
+
+  getSnapshot() {
+    const sorted = [...this.recentLatencies].sort((a, b) => a - b);
+    const p50 = sorted[Math.floor(sorted.length * 0.5)] || 0;
+    const p95 = sorted[Math.floor(sorted.length * 0.95)] || 0;
+    const p99 = sorted[Math.floor(sorted.length * 0.99)] || 0;
+
+    const toolStats: Record<string, any> = {};
+    this.toolMetrics.forEach((m, name) => {
+      toolStats[name] = {
+        totalCalls: m.totalCalls,
+        successRate: m.totalCalls > 0 ? Math.round(m.successCount / m.totalCalls * 100) : 0,
+        avgDurationMs: Math.round(m.avgDurationMs),
+        maxDurationMs: Math.round(m.maxDurationMs),
+      };
+    });
+
+    return {
+      totalRequests: this.requestCount,
+      avgLatencyMs: this.requestCount > 0 ? Math.round(this.totalRequestDurationMs / this.requestCount) : 0,
+      p50LatencyMs: Math.round(p50),
+      p95LatencyMs: Math.round(p95),
+      p99LatencyMs: Math.round(p99),
+      uptimeMinutes: Math.round((Date.now() - this.startedAt) / 60000),
+      toolStats,
+      totalToolCalls: Array.from(this.toolMetrics.values()).reduce((s, m) => s + m.totalCalls, 0),
+      recentLatencies: this.recentLatencies.slice(-20).map(l => Math.round(l)),
+    };
+  }
+}
+
+export const performanceTracker = new PerformanceTracker();
