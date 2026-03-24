@@ -298,45 +298,46 @@
 
         <!-- Service icons row -->
         <div class="flex items-start gap-5 flex-wrap justify-center max-w-2xl">
-          <div class="service-icon-item" onclick="sendQuickAction('Start a new chat conversation')">
-            <div class="service-icon-circle" style="background:#fef2f2;"><i class="fas fa-comments" style="color:#ef4444;"></i></div>
+          <div class="service-icon-item" onclick="sendQuickAction('Create a presentation slide deck')">
+            <div class="service-icon-circle" style="background:#ecfdf5;"><i class="fas fa-file-powerpoint" style="color:#10b981;"></i></div>
+            <span class="service-icon-label">AI Slides</span>
+          </div>
+          <div class="service-icon-item" onclick="sendQuickAction('Create a spreadsheet')">
+            <div class="service-icon-circle" style="background:#f0fdf4;"><i class="fas fa-table" style="color:#22c55e;"></i></div>
+            <span class="service-icon-label">AI Sheets</span>
+          </div>
+          <div class="service-icon-item" onclick="sendQuickAction('Create a document')">
+            <div class="service-icon-circle" style="background:#eff6ff;"><i class="fas fa-file-alt" style="color:#3b82f6;"></i></div>
+            <span class="service-icon-label">AI Docs</span>
+          </div>
+          <div class="service-icon-item" onclick="sendQuickAction('Help me design a UI layout')">
+            <div class="service-icon-circle" style="background:#fdf4ff;"><i class="fas fa-pen-ruler" style="color:#a855f7;"></i></div>
+            <span class="service-icon-label">AI Designer</span>
+          </div>
+          <div class="service-icon-item" onclick="sendQuickAction('Start a new chat conversation')" style="position:relative;">
+            <div class="service-icon-circle" style="background:#eef2ff;"><i class="fas fa-comment-dots" style="color:#6366f1;"></i></div>
+            <div style="position:absolute;top:0;right:14px;width:8px;height:8px;background:#3b82f6;border-radius:50%;border:2px solid #fff;"></div>
             <span class="service-icon-label">AI Chat</span>
           </div>
-          <div class="service-icon-item" onclick="sendQuickAction('Help me write and edit code')">
-            <div class="service-icon-circle" style="background:#eef2ff;"><i class="fas fa-code" style="color:#6366f1;"></i></div>
-            <span class="service-icon-label">AI Coder</span>
+          <div class="service-icon-item" onclick="sendQuickAction('Generate an image')">
+            <div class="service-icon-circle" style="background:#fff7ed;"><i class="fas fa-image" style="color:#f97316;"></i></div>
+            <span class="service-icon-label">AI Image</span>
           </div>
-          <div class="service-icon-item" onclick="sendQuickAction('Search the web for the latest information')">
-            <div class="service-icon-circle" style="background:#f0fdf4;"><i class="fas fa-search" style="color:#22c55e;"></i></div>
-            <span class="service-icon-label">Web Search</span>
+          <div class="service-icon-item" onclick="sendQuickAction('Generate music or audio')">
+            <div class="service-icon-circle" style="background:#fef2f2;"><i class="fas fa-music" style="color:#ef4444;"></i></div>
+            <span class="service-icon-label">AI Music</span>
           </div>
-          <div class="service-icon-item" onclick="sendQuickAction('Search my RAG knowledge base')">
-            <div class="service-icon-circle" style="background:#eff6ff;"><i class="fas fa-database" style="color:#3b82f6;"></i></div>
-            <span class="service-icon-label">RAG Search</span>
+          <div class="service-icon-item" onclick="sendQuickAction('Generate a video')">
+            <div class="service-icon-circle" style="background:#ecfdf5;"><i class="fas fa-video" style="color:#14b8a6;"></i></div>
+            <span class="service-icon-label">AI Video</span>
+          </div>
+          <div class="service-icon-item" onclick="sendQuickAction('Summarize meeting notes')">
+            <div class="service-icon-circle" style="background:#ecfdf5;"><i class="fas fa-clipboard-list" style="color:#0ea5e9;"></i></div>
+            <span class="service-icon-label">AI Meeting<br>Notes</span>
           </div>
           <div class="service-icon-item" onclick="sendQuickAction('Show available AI agents and their capabilities')">
-            <div class="service-icon-circle" style="background:#fdf4ff;"><i class="fas fa-robot" style="color:#a855f7;"></i></div>
-            <span class="service-icon-label">AI Agents</span>
-          </div>
-          <div class="service-icon-item" onclick="sendQuickAction('Show my workspace files')">
-            <div class="service-icon-circle" style="background:#fff7ed;"><i class="fas fa-folder" style="color:#f97316;"></i></div>
-            <span class="service-icon-label">Files</span>
-          </div>
-          <div class="service-icon-item" onclick="sendQuickAction('Deploy my workspace to Cloudflare Pages')">
-            <div class="service-icon-circle" style="background:#ecfdf5;"><i class="fas fa-cloud-upload-alt" style="color:#10b981;"></i></div>
-            <span class="service-icon-label">Deploy</span>
-          </div>
-          <div class="service-icon-item" onclick="sendQuickAction('Show my project memory and context')">
-            <div class="service-icon-circle" style="background:#fefce8;"><i class="fas fa-brain" style="color:#eab308;"></i></div>
-            <span class="service-icon-label">Memory</span>
-          </div>
-          <div class="service-icon-item" onclick="sendQuickAction('List available tools and their categories')">
-            <div class="service-icon-circle" style="background:#f0fdfa;"><i class="fas fa-wrench" style="color:#14b8a6;"></i></div>
-            <span class="service-icon-label">Tools</span>
-          </div>
-          <div class="service-icon-item" onclick="sendQuickAction('Run a multi-step workflow')">
-            <div class="service-icon-circle" style="background:#f5f5f5;"><i class="fas fa-project-diagram" style="color:#6b7280;"></i></div>
-            <span class="service-icon-label">Workflows</span>
+            <div class="service-icon-circle" style="background:#f5f5f5;"><i class="fas fa-star-of-life" style="color:#9ca3af;"></i></div>
+            <span class="service-icon-label">All Agents</span>
           </div>
         </div>
 
