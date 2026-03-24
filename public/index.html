@@ -1,0 +1,323 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Agentic RAG Platform</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link href="https://cdn.jsdelivr.net/npm/@fortawesome/fontawesome-free@6.5.0/css/all.min.css" rel="stylesheet">
+  <link href="https://cdn.jsdelivr.net/npm/highlight.js@11.9.0/styles/github-dark.min.css" rel="stylesheet">
+  <script src="https://cdn.jsdelivr.net/npm/marked@15.0.0/marked.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/highlight.js@11.9.0/highlight.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          colors: {
+            primary: { 50:'#eef2ff',100:'#e0e7ff',200:'#c7d2fe',500:'#6366f1',600:'#4f46e5',700:'#4338ca',800:'#3730a3',900:'#312e81' },
+            surface: { 50:'#f8fafc',100:'#f1f5f9',700:'#1e293b',800:'#0f172a',900:'#020617' },
+          }
+        }
+      }
+    }
+  </script>
+  <style>
+    * { scrollbar-width: thin; scrollbar-color: #334155 #0f172a; }
+    ::-webkit-scrollbar { width: 6px; }
+    ::-webkit-scrollbar-track { background: #0f172a; }
+    ::-webkit-scrollbar-thumb { background: #334155; border-radius: 3px; }
+    @keyframes pulse-dot { 0%,100%{opacity:1} 50%{opacity:0.3} }
+    .thinking-dot { animation: pulse-dot 1.5s infinite; }
+    @keyframes slide-in { from{opacity:0;transform:translateY(10px)} to{opacity:1;transform:translateY(0)} }
+    .message-enter { animation: slide-in 0.3s ease-out; }
+    .tool-card { transition: all 0.2s; }
+    .tool-card:hover { transform: translateY(-1px); box-shadow: 0 4px 12px rgba(0,0,0,0.3); }
+    pre code { font-size: 13px !important; line-height: 1.5 !important; }
+    .file-tree-item { cursor: pointer; padding: 3px 8px; border-radius: 4px; transition: background 0.15s; }
+    .file-tree-item:hover { background: rgba(99,102,241,0.15); }
+    .resize-handle { cursor: col-resize; width: 4px; background: transparent; transition: background 0.2s; }
+    .resize-handle:hover { background: #6366f1; }
+  </style>
+</head>
+<body class="bg-surface-900 text-gray-200 h-screen flex flex-col overflow-hidden">
+
+  <!-- ============================================================ -->
+  <!-- TOP BAR -->
+  <!-- ============================================================ -->
+  <header class="bg-surface-800 border-b border-gray-700 px-4 py-2 flex items-center justify-between shrink-0">
+    <div class="flex items-center gap-3">
+      <div class="w-8 h-8 bg-primary-600 rounded-lg flex items-center justify-center">
+        <i class="fas fa-brain text-white text-sm"></i>
+      </div>
+      <h1 class="text-lg font-bold text-white">Agentic RAG Platform</h1>
+      <span class="text-xs px-2 py-0.5 bg-primary-600/30 text-primary-200 rounded-full">v1.0</span>
+    </div>
+    <div class="flex items-center gap-3">
+      <div id="statusBadge" class="flex items-center gap-1.5 px-2 py-1 rounded-full bg-green-500/20 text-green-400 text-xs">
+        <div class="w-1.5 h-1.5 rounded-full bg-green-400"></div>
+        <span>Connected</span>
+      </div>
+      <button onclick="showSettings()" class="p-2 hover:bg-surface-700 rounded-lg transition" title="Settings">
+        <i class="fas fa-cog text-gray-400"></i>
+      </button>
+      <button onclick="toggleTheme()" class="p-2 hover:bg-surface-700 rounded-lg transition" title="Toggle theme">
+        <i class="fas fa-moon text-gray-400"></i>
+      </button>
+    </div>
+  </header>
+
+  <!-- ============================================================ -->
+  <!-- MAIN LAYOUT: Sidebar | Chat | Inspector -->
+  <!-- ============================================================ -->
+  <div class="flex flex-1 overflow-hidden">
+
+    <!-- ======================================== -->
+    <!-- LEFT SIDEBAR — File Explorer + Workspaces -->
+    <!-- ======================================== -->
+    <aside id="sidebar" class="w-72 bg-surface-800 border-r border-gray-700 flex flex-col shrink-0">
+      <!-- Workspace Selector -->
+      <div class="p-3 border-b border-gray-700">
+        <div class="flex items-center justify-between mb-2">
+          <span class="text-xs font-semibold text-gray-400 uppercase tracking-wider">Workspace</span>
+          <button onclick="createWorkspace()" class="text-xs text-primary-500 hover:text-primary-400 transition">
+            <i class="fas fa-plus mr-1"></i>New
+          </button>
+        </div>
+        <select id="workspaceSelect" onchange="loadWorkspace(this.value)"
+          class="w-full bg-surface-700 border border-gray-600 rounded-lg px-3 py-1.5 text-sm text-gray-200 focus:outline-none focus:ring-1 focus:ring-primary-500">
+          <option value="default">default</option>
+        </select>
+      </div>
+
+      <!-- File Tree -->
+      <div class="flex-1 overflow-y-auto p-2">
+        <div class="flex items-center justify-between px-2 py-1">
+          <span class="text-xs font-semibold text-gray-400 uppercase tracking-wider">Files</span>
+          <button onclick="refreshFileTree()" class="text-gray-500 hover:text-gray-300 transition">
+            <i class="fas fa-sync-alt text-xs"></i>
+          </button>
+        </div>
+        <div id="fileTree" class="mt-1 text-sm">
+          <div class="text-gray-500 text-xs px-2 py-4">Loading files...</div>
+        </div>
+      </div>
+
+      <!-- RAG Knowledge Base -->
+      <div class="border-t border-gray-700 p-3">
+        <div class="flex items-center justify-between mb-2">
+          <span class="text-xs font-semibold text-gray-400 uppercase tracking-wider">Knowledge Base</span>
+          <button onclick="showRAGPanel()" class="text-xs text-primary-500 hover:text-primary-400">
+            <i class="fas fa-database mr-1"></i>Manage
+          </button>
+        </div>
+        <div id="ragDocCount" class="text-xs text-gray-500">0 documents indexed</div>
+      </div>
+    </aside>
+
+    <div class="resize-handle" id="leftResize"></div>
+
+    <!-- ======================================== -->
+    <!-- CENTER — Chat Interface -->
+    <!-- ======================================== -->
+    <main class="flex-1 flex flex-col min-w-0">
+      <!-- Chat Messages -->
+      <div id="chatMessages" class="flex-1 overflow-y-auto px-4 py-4 space-y-4">
+        <!-- Welcome Message -->
+        <div class="max-w-3xl mx-auto">
+          <div class="text-center py-12">
+            <div class="w-16 h-16 bg-primary-600/20 rounded-2xl flex items-center justify-center mx-auto mb-4">
+              <i class="fas fa-robot text-primary-500 text-2xl"></i>
+            </div>
+            <h2 class="text-xl font-bold text-white mb-2">Agentic RAG Platform</h2>
+            <p class="text-gray-400 text-sm max-w-md mx-auto mb-6">
+              Your self-hosted AI development platform. I can write code, search your knowledge base,
+              manage files, run builds, deploy to Cloudflare/Vercel, and more.
+            </p>
+            <div class="flex flex-wrap justify-center gap-2">
+              <button onclick="sendQuickAction('Show me the system status and available tools')"
+                class="px-3 py-1.5 bg-surface-700 hover:bg-surface-600 rounded-lg text-xs text-gray-300 transition">
+                <i class="fas fa-heartbeat mr-1 text-green-400"></i>System Status
+              </button>
+              <button onclick="sendQuickAction('Create a new Hono web app with a REST API and Tailwind frontend')"
+                class="px-3 py-1.5 bg-surface-700 hover:bg-surface-600 rounded-lg text-xs text-gray-300 transition">
+                <i class="fas fa-code mr-1 text-blue-400"></i>Create Web App
+              </button>
+              <button onclick="sendQuickAction('Search the web for the latest Hono framework features')"
+                class="px-3 py-1.5 bg-surface-700 hover:bg-surface-600 rounded-lg text-xs text-gray-300 transition">
+                <i class="fas fa-search mr-1 text-yellow-400"></i>Web Search
+              </button>
+              <button onclick="sendQuickAction('List my GitHub repositories')"
+                class="px-3 py-1.5 bg-surface-700 hover:bg-surface-600 rounded-lg text-xs text-gray-300 transition">
+                <i class="fab fa-github mr-1 text-gray-400"></i>GitHub Repos
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Chat Input -->
+      <div class="border-t border-gray-700 bg-surface-800 p-4">
+        <div class="max-w-3xl mx-auto">
+          <div class="flex gap-3">
+            <div class="flex-1 relative">
+              <textarea id="chatInput"
+                placeholder="Ask me anything... Build a website, search docs, deploy code..."
+                rows="1"
+                onkeydown="handleInputKeydown(event)"
+                oninput="autoResize(this)"
+                class="w-full bg-surface-700 border border-gray-600 rounded-xl px-4 py-3 pr-12 text-sm text-gray-200 placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent resize-none max-h-32"
+              ></textarea>
+              <button onclick="sendMessage()" id="sendBtn"
+                class="absolute right-2 bottom-2 w-8 h-8 bg-primary-600 hover:bg-primary-500 rounded-lg flex items-center justify-center transition">
+                <i class="fas fa-paper-plane text-white text-xs"></i>
+              </button>
+            </div>
+          </div>
+          <div class="flex items-center justify-between mt-2 text-xs text-gray-500">
+            <span>Press Enter to send, Shift+Enter for new line</span>
+            <span id="tokenCounter">Tokens: 0 | Cost: $0.00</span>
+          </div>
+        </div>
+      </div>
+    </main>
+
+    <div class="resize-handle" id="rightResize"></div>
+
+    <!-- ======================================== -->
+    <!-- RIGHT PANEL — Agent Trace + Terminal -->
+    <!-- ======================================== -->
+    <aside id="inspector" class="w-80 bg-surface-800 border-l border-gray-700 flex flex-col shrink-0">
+      <!-- Panel Tabs -->
+      <div class="flex border-b border-gray-700">
+        <button onclick="switchInspectorTab('trace')" id="tab-trace"
+          class="flex-1 px-3 py-2 text-xs font-medium text-primary-400 border-b-2 border-primary-500 transition">
+          <i class="fas fa-route mr-1"></i>Agent Trace
+        </button>
+        <button onclick="switchInspectorTab('terminal')" id="tab-terminal"
+          class="flex-1 px-3 py-2 text-xs font-medium text-gray-400 hover:text-gray-200 border-b-2 border-transparent transition">
+          <i class="fas fa-terminal mr-1"></i>Terminal
+        </button>
+        <button onclick="switchInspectorTab('preview')" id="tab-preview"
+          class="flex-1 px-3 py-2 text-xs font-medium text-gray-400 hover:text-gray-200 border-b-2 border-transparent transition">
+          <i class="fas fa-eye mr-1"></i>Preview
+        </button>
+      </div>
+
+      <!-- Trace Panel -->
+      <div id="panel-trace" class="flex-1 overflow-y-auto p-3 space-y-2">
+        <div class="text-xs text-gray-500 text-center py-8">
+          <i class="fas fa-route text-2xl mb-2 block text-gray-600"></i>
+          Agent trace will appear here as the AI works
+        </div>
+      </div>
+
+      <!-- Terminal Panel -->
+      <div id="panel-terminal" class="flex-1 overflow-y-auto hidden">
+        <div id="terminalOutput" class="p-3 font-mono text-xs text-green-400 bg-black/50 min-h-full">
+          <div class="text-gray-500">$ Agentic RAG Terminal v1.0</div>
+          <div class="text-gray-500">$ Type commands or let the agent execute them</div>
+          <div class="text-gray-500">$</div>
+        </div>
+        <div class="border-t border-gray-700 p-2 flex gap-2">
+          <span class="text-green-400 font-mono text-xs py-1">$</span>
+          <input id="terminalInput" type="text" placeholder="Enter command..."
+            onkeydown="if(event.key==='Enter')executeTerminalCmd()"
+            class="flex-1 bg-transparent border-none text-xs font-mono text-green-400 focus:outline-none placeholder-gray-600">
+        </div>
+      </div>
+
+      <!-- Preview Panel -->
+      <div id="panel-preview" class="flex-1 hidden">
+        <div class="p-3 text-xs text-gray-500 text-center py-8">
+          <i class="fas fa-eye text-2xl mb-2 block text-gray-600"></i>
+          Live preview will appear when a workspace has a running build
+        </div>
+        <iframe id="previewFrame" class="w-full h-full hidden" sandbox="allow-scripts allow-same-origin"></iframe>
+      </div>
+    </aside>
+  </div>
+
+  <!-- ============================================================ -->
+  <!-- SETTINGS MODAL -->
+  <!-- ============================================================ -->
+  <div id="settingsModal" class="fixed inset-0 bg-black/60 z-50 hidden flex items-center justify-center">
+    <div class="bg-surface-800 rounded-2xl border border-gray-700 w-full max-w-lg max-h-[80vh] overflow-y-auto p-6">
+      <div class="flex items-center justify-between mb-6">
+        <h3 class="text-lg font-bold text-white">Settings</h3>
+        <button onclick="hideSettings()" class="text-gray-400 hover:text-white"><i class="fas fa-times"></i></button>
+      </div>
+
+      <div class="space-y-4">
+        <div>
+          <label class="text-xs font-semibold text-gray-400 uppercase">LLM Provider</label>
+          <select id="settingsProvider" class="w-full mt-1 bg-surface-700 border border-gray-600 rounded-lg px-3 py-2 text-sm">
+            <option value="openai">OpenAI (GPT-4o)</option>
+            <option value="anthropic">Anthropic (Claude)</option>
+            <option value="google">Google (Gemini)</option>
+            <option value="groq">Groq (Llama)</option>
+            <option value="ollama">Ollama (Local)</option>
+          </select>
+        </div>
+        <div>
+          <label class="text-xs font-semibold text-gray-400 uppercase">Approval Mode</label>
+          <select id="settingsApproval" class="w-full mt-1 bg-surface-700 border border-gray-600 rounded-lg px-3 py-2 text-sm">
+            <option value="dangerous">Require approval for dangerous operations</option>
+            <option value="all">Require approval for all tool calls</option>
+            <option value="none">Auto-approve everything (use with caution)</option>
+          </select>
+        </div>
+        <div>
+          <label class="text-xs font-semibold text-gray-400 uppercase">Max Budget Per Request ($)</label>
+          <input type="number" id="settingsBudget" value="1.00" step="0.1" min="0.1"
+            class="w-full mt-1 bg-surface-700 border border-gray-600 rounded-lg px-3 py-2 text-sm">
+        </div>
+      </div>
+
+      <div class="mt-6 pt-4 border-t border-gray-700">
+        <h4 class="text-sm font-semibold text-white mb-3">System Information</h4>
+        <div id="systemInfo" class="text-xs text-gray-400 space-y-1">Loading...</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============================================================ -->
+  <!-- RAG MANAGEMENT MODAL -->
+  <!-- ============================================================ -->
+  <div id="ragModal" class="fixed inset-0 bg-black/60 z-50 hidden flex items-center justify-center">
+    <div class="bg-surface-800 rounded-2xl border border-gray-700 w-full max-w-2xl max-h-[80vh] overflow-y-auto p-6">
+      <div class="flex items-center justify-between mb-4">
+        <h3 class="text-lg font-bold text-white"><i class="fas fa-database mr-2 text-primary-500"></i>Knowledge Base</h3>
+        <button onclick="hideRAGPanel()" class="text-gray-400 hover:text-white"><i class="fas fa-times"></i></button>
+      </div>
+
+      <!-- Ingest Form -->
+      <div class="mb-4 p-4 bg-surface-700 rounded-lg">
+        <h4 class="text-sm font-semibold text-white mb-2">Add Document</h4>
+        <input id="ragTitle" placeholder="Document title" class="w-full bg-surface-800 border border-gray-600 rounded-lg px-3 py-2 text-sm mb-2">
+        <textarea id="ragContent" placeholder="Paste document content here..." rows="4"
+          class="w-full bg-surface-800 border border-gray-600 rounded-lg px-3 py-2 text-sm mb-2 resize-none"></textarea>
+        <div class="flex gap-2">
+          <select id="ragType" class="bg-surface-800 border border-gray-600 rounded-lg px-3 py-2 text-sm">
+            <option value="text">Text</option>
+            <option value="markdown">Markdown</option>
+            <option value="code">Code</option>
+            <option value="html">HTML</option>
+          </select>
+          <button onclick="ingestDocument()" class="px-4 py-2 bg-primary-600 hover:bg-primary-500 rounded-lg text-sm font-medium transition">
+            <i class="fas fa-upload mr-1"></i>Ingest
+          </button>
+        </div>
+      </div>
+
+      <!-- Document List -->
+      <div id="ragDocList" class="space-y-2">
+        <div class="text-sm text-gray-500 text-center py-4">No documents ingested yet</div>
+      </div>
+    </div>
+  </div>
+
+  <script src="/static/js/app.js"></script>
+</body>
+</html>

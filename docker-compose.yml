@@ -1,0 +1,125 @@
+version: '3.9'
+
+services:
+  # ============================================================
+  # APPLICATION SERVER
+  # ============================================================
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: agentic-rag-app
+    restart: unless-stopped
+    ports:
+      - "${PORT:-3000}:3000"
+      - "${PREVIEW_PORT:-3001}:3001"
+    environment:
+      - NODE_ENV=${NODE_ENV:-development}
+      - PORT=3000
+      - HOST=0.0.0.0
+      - SECRET_KEY=${SECRET_KEY:-change-this-in-production}
+      - DATABASE_URL=postgresql://agentic:agentic_password@postgres:5432/agentic_rag
+      - REDIS_URL=redis://redis:6379
+      - CHROMA_URL=http://chromadb:8000
+      - CHROMA_COLLECTION=${CHROMA_COLLECTION:-agentic_rag_docs}
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+      - GOOGLE_AI_API_KEY=${GOOGLE_AI_API_KEY:-}
+      - MISTRAL_API_KEY=${MISTRAL_API_KEY:-}
+      - GROQ_API_KEY=${GROQ_API_KEY:-}
+      - OLLAMA_BASE_URL=${OLLAMA_BASE_URL:-http://host.docker.internal:11434}
+      - GITHUB_TOKEN=${GITHUB_TOKEN:-}
+      - CLOUDFLARE_API_TOKEN=${CLOUDFLARE_API_TOKEN:-}
+      - CLOUDFLARE_ACCOUNT_ID=${CLOUDFLARE_ACCOUNT_ID:-}
+      - VERCEL_TOKEN=${VERCEL_TOKEN:-}
+      - WORKSPACE_ROOT=/app/workspaces
+      - DEFAULT_LLM_PROVIDER=${DEFAULT_LLM_PROVIDER:-openai}
+      - DEFAULT_MODEL=${DEFAULT_MODEL:-gpt-4o}
+      - AGENT_MAX_ITERATIONS=${AGENT_MAX_ITERATIONS:-25}
+      - AGENT_TIMEOUT_MS=${AGENT_TIMEOUT_MS:-120000}
+      - ENABLE_AUTH=${ENABLE_AUTH:-false}
+    volumes:
+      - workspaces:/app/workspaces
+      - ./public:/app/public:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      chromadb:
+        condition: service_started
+    networks:
+      - agentic-network
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+  # ============================================================
+  # POSTGRESQL — Metadata, conversations, users
+  # ============================================================
+  postgres:
+    image: postgres:16-alpine
+    container_name: agentic-rag-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: agentic
+      POSTGRES_PASSWORD: agentic_password
+      POSTGRES_DB: agentic_rag
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./migrations/001_initial_schema.sql:/docker-entrypoint-initdb.d/001_initial_schema.sql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U agentic -d agentic_rag"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - agentic-network
+
+  # ============================================================
+  # REDIS — Caching, rate limiting, task queue
+  # ============================================================
+  redis:
+    image: redis:7-alpine
+    container_name: agentic-rag-redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    command: redis-server --appendonly yes --maxmemory 256mb --maxmemory-policy allkeys-lru
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - agentic-network
+
+  # ============================================================
+  # CHROMADB — Vector database for RAG embeddings
+  # ============================================================
+  chromadb:
+    image: chromadb/chroma:latest
+    container_name: agentic-rag-chromadb
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    volumes:
+      - chroma_data:/chroma/chroma
+    environment:
+      - IS_PERSISTENT=TRUE
+      - ANONYMIZED_TELEMETRY=FALSE
+    networks:
+      - agentic-network
+
+volumes:
+  postgres_data:
+  redis_data:
+  chroma_data:
+  workspaces:
+
+networks:
+  agentic-network:
+    driver: bridge
