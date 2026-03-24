@@ -2,41 +2,59 @@ import { Hono } from 'hono';
 import { Orchestrator } from '../agent/orchestrator.js';
 import { SSEWriter } from '../genui/engine.js';
 import { createLogger, generateId } from '../utils/index.js';
-import { LLMMessage } from '../types/index.js';
 import { workspaceConfig } from '../config/index.js';
+import {
+  createConversation,
+  addMessage,
+  getConversation,
+  getMessages,
+  listConversations,
+  deleteConversation,
+  updateTitle,
+} from '../database/conversations.js';
 import path from 'path';
 
 const logger = createLogger('ChatRoute');
 
 const chatRoutes = new Hono();
 
-// Store active conversations in memory (production: use Redis)
-const conversations = new Map<string, { messages: LLMMessage[]; workspacePath: string }>();
-
 // ============================================================
 // POST /api/chat — Main chat endpoint with SSE streaming
 // ============================================================
 chatRoutes.post('/', async (c) => {
   const body = await c.req.json();
-  const { message, conversationId, workspaceId } = body;
+  const { message, conversationId, workspaceId, userId } = body;
 
   if (!message) {
     return c.json({ success: false, error: { code: 'MISSING_MESSAGE', message: 'Message is required' } }, 400);
   }
 
-  const convId = conversationId || generateId('conv');
   const workspacePath = workspaceId
     ? path.resolve(workspaceConfig.root, workspaceId)
     : path.resolve(workspaceConfig.root, 'default');
 
-  // Get or create conversation
-  if (!conversations.has(convId)) {
-    conversations.set(convId, { messages: [], workspacePath });
+  // Get or create conversation (persisted to DB when available)
+  let convId = conversationId;
+  if (!convId) {
+    convId = await createConversation({ workspacePath, userId });
+  } else {
+    // Ensure conversation exists in our store
+    const existing = await getConversation(convId);
+    if (!existing) {
+      await createConversation({ id: convId, workspacePath, userId });
+    }
   }
-  const conv = conversations.get(convId)!;
 
-  // Add user message to history
-  conv.messages.push({ role: 'user', content: message });
+  // Add user message to persistent store
+  await addMessage({
+    conversationId: convId,
+    role: 'user',
+    content: message,
+  });
+
+  // Get message history for the orchestrator (without the just-added user message)
+  const history = await getMessages(convId);
+  const historyWithoutCurrent = history.slice(0, -1);
 
   // Create SSE stream
   const sseWriter = new SSEWriter();
@@ -45,25 +63,35 @@ chatRoutes.post('/', async (c) => {
   // Create orchestrator
   const orchestrator = new Orchestrator(
     convId,
-    'default-user',
-    conv.workspacePath,
+    userId || 'default-user',
+    workspacePath,
     (event) => sseWriter.write(event)
   );
 
   // Run orchestrator in background
   (async () => {
     try {
-      const response = await orchestrator.execute(
-        message,
-        conv.messages.slice(0, -1) // Pass history without current message
-      );
+      const response = await orchestrator.execute(message, historyWithoutCurrent);
 
-      // Add assistant response to history
-      conv.messages.push({ role: 'assistant', content: response });
+      // Get usage stats from orchestrator
+      const usage = orchestrator.getUsage?.() || {};
 
-      // Keep conversation history manageable
-      if (conv.messages.length > 50) {
-        conv.messages = conv.messages.slice(-40);
+      // Add assistant response to persistent store
+      await addMessage({
+        conversationId: convId,
+        role: 'assistant',
+        content: response,
+        tokensUsed: usage.totalTokens || 0,
+        costUSD: usage.totalCostUSD || 0,
+        model: usage.modelsUsed?.[0] || undefined,
+        durationMs: usage.durationMs || 0,
+      });
+
+      // Auto-generate a conversation title from the first user message
+      const conv = await getConversation(convId);
+      if (conv && conv.title === 'New Conversation' && message.length > 0) {
+        const title = message.substring(0, 80) + (message.length > 80 ? '...' : '');
+        await updateTitle(convId, title);
       }
     } catch (error: any) {
       logger.error(`Chat error: ${error.message}`);
@@ -85,34 +113,51 @@ chatRoutes.post('/', async (c) => {
 // ============================================================
 // GET /api/chat/conversations — List conversations
 // ============================================================
-chatRoutes.get('/conversations', (c) => {
-  const convList = Array.from(conversations.entries()).map(([id, conv]) => ({
-    id,
-    messageCount: conv.messages.length,
-    lastMessage: conv.messages[conv.messages.length - 1]?.content?.substring(0, 100),
-    workspacePath: conv.workspacePath,
-  }));
+chatRoutes.get('/conversations', async (c) => {
+  const userId = c.req.query('userId');
+  const convList = await listConversations(userId);
   return c.json({ success: true, data: convList });
 });
 
 // ============================================================
 // GET /api/chat/:id/history — Get conversation history
 // ============================================================
-chatRoutes.get('/:id/history', (c) => {
+chatRoutes.get('/:id/history', async (c) => {
   const id = c.req.param('id');
-  const conv = conversations.get(id);
+  const conv = await getConversation(id);
   if (!conv) {
     return c.json({ success: false, error: { code: 'NOT_FOUND', message: 'Conversation not found' } }, 404);
   }
-  return c.json({ success: true, data: { id, messages: conv.messages } });
+  return c.json({
+    success: true,
+    data: {
+      id: conv.id,
+      title: conv.title,
+      messages: conv.messages,
+      totalTokens: conv.totalTokens,
+      totalCostUSD: conv.totalCostUSD,
+    },
+  });
+});
+
+// ============================================================
+// PATCH /api/chat/:id — Update conversation (e.g., title)
+// ============================================================
+chatRoutes.patch('/:id', async (c) => {
+  const id = c.req.param('id');
+  const body = await c.req.json();
+  if (body.title) {
+    await updateTitle(id, body.title);
+  }
+  return c.json({ success: true, data: { updated: true } });
 });
 
 // ============================================================
 // DELETE /api/chat/:id — Delete conversation
 // ============================================================
-chatRoutes.delete('/:id', (c) => {
+chatRoutes.delete('/:id', async (c) => {
   const id = c.req.param('id');
-  conversations.delete(id);
+  await deleteConversation(id);
   return c.json({ success: true, data: { deleted: true } });
 });
 
