@@ -4,9 +4,14 @@
   "description": "Self-hosted Agentic RAG Platform — MoE Architecture, GenUI Streaming, 30+ Tools, Graph Orchestration",
   "type": "module",
   "engines": { "node": ">=20.0.0" },
+  "overrides": {
+    "chromadb": {
+      "@google/generative-ai": "^0.21.0"
+    }
+  },
   "scripts": {
     "dev": "tsx watch src/index.ts",
-    "build": "tsc",
+    "build": "npx tsc",
     "start": "node dist/index.js",
     "start:pm2": "pm2 start ecosystem.config.cjs",
     "db:migrate": "tsx src/database/migrate.ts",
@@ -16,7 +21,7 @@
     "docker:down": "docker-compose down",
     "docker:build": "docker-compose build",
     "docker:logs": "docker-compose logs -f app",
-    "typecheck": "tsc --noEmit",
+    "typecheck": "npx tsc --noEmit",
     "lint": "echo 'No linter configured yet'"
   },
   "dependencies": {
