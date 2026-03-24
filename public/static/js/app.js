@@ -41,8 +41,8 @@ function switchSidebar(name) {
   const title = document.getElementById('sidePanelTitle');
   const content = document.getElementById('sidePanelContent');
 
-  // Toggle off if clicking the same one
-  if (activeSidebar === name && name !== 'chat') {
+  // Toggle off if clicking the same sidebar button again
+  if (activeSidebar === name) {
     closeSidePanel();
     return;
   }
@@ -54,22 +54,17 @@ function switchSidebar(name) {
 
   activeSidebar = name;
 
-  // "chat" = toggle conversation history panel
+  // Remove panel-hidden class and show panel (class has !important so inline style alone won't work)
+  panel.classList.remove('panel-hidden');
+  panel.style.display = 'flex';
+
+  // "chat" = show conversation history panel
   if (name === 'chat') {
-    if (activeSidebar === 'chat') {
-      closeSidePanel();
-      return;
-    }
-    panel.style.display = 'flex';
     title.textContent = 'Conversations';
     content.innerHTML = buildConversationListPanel();
     loadConversationList();
-    activeSidebar = 'chat';
     return;
   }
-
-  // Show slide-out panel
-  panel.style.display = 'flex';
 
   switch (name) {
     case 'agents':
@@ -109,12 +104,10 @@ function switchSidebar(name) {
 }
 
 function closeSidePanel() {
-  document.getElementById('sidePanel').style.display = 'none';
-  if (activeSidebar && activeSidebar !== 'chat') {
-    document.querySelectorAll('.sidebar-btn').forEach(b => {
-      b.classList.toggle('active', b.dataset.sidebar === 'chat');
-    });
-  }
+  const panel = document.getElementById('sidePanel');
+  panel.classList.add('panel-hidden');
+  panel.style.display = '';
+  document.querySelectorAll('.sidebar-btn').forEach(b => b.classList.remove('active'));
   activeSidebar = null;
 }
 
