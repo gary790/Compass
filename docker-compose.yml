@@ -13,6 +13,8 @@ services:
     ports:
       - "${PORT:-3000}:3000"
       - "${PREVIEW_PORT:-3001}:3001"
+      # Sandbox preview port range
+      - "4000-4100:4000-4100"
     environment:
       - NODE_ENV=${NODE_ENV:-development}
       - PORT=3000
@@ -38,9 +40,22 @@ services:
       - AGENT_MAX_ITERATIONS=${AGENT_MAX_ITERATIONS:-25}
       - AGENT_TIMEOUT_MS=${AGENT_TIMEOUT_MS:-120000}
       - ENABLE_AUTH=${ENABLE_AUTH:-false}
+      # Sandbox configuration
+      - DOCKER_SOCKET=/var/run/docker.sock
+      - SANDBOX_IMAGE=agentic-sandbox:latest
+      - SANDBOX_NETWORK=sandbox-network
+      - SANDBOX_CPU_LIMIT=${SANDBOX_CPU_LIMIT:-1.0}
+      - SANDBOX_MEMORY_MB=${SANDBOX_MEMORY_MB:-512}
+      - SANDBOX_DISK_MB=${SANDBOX_DISK_MB:-1024}
+      - SANDBOX_MAX_CONTAINERS=${SANDBOX_MAX_CONTAINERS:-20}
+      - SANDBOX_IDLE_TIMEOUT_MS=${SANDBOX_IDLE_TIMEOUT_MS:-1800000}
+      - SANDBOX_PORT_START=4000
+      - SANDBOX_PORT_END=4100
     volumes:
       - workspaces:/app/workspaces
       - ./public:/app/public:ro
+      # Mount Docker socket for sandbox container management
+      - /var/run/docker.sock:/var/run/docker.sock
     depends_on:
       postgres:
         condition: service_healthy
@@ -50,6 +65,7 @@ services:
         condition: service_started
     networks:
       - agentic-network
+      - sandbox-network
     extra_hosts:
       - "host.docker.internal:host-gateway"
 
@@ -69,6 +85,8 @@ services:
     volumes:
       - postgres_data:/var/lib/postgresql/data
       - ./migrations/001_initial_schema.sql:/docker-entrypoint-initdb.d/001_initial_schema.sql
+      - ./migrations/002_project_memory.sql:/docker-entrypoint-initdb.d/002_project_memory.sql
+      - ./migrations/003_sandbox_containers.sql:/docker-entrypoint-initdb.d/003_sandbox_containers.sql
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U agentic -d agentic_rag"]
       interval: 5s
@@ -123,3 +141,12 @@ volumes:
 networks:
   agentic-network:
     driver: bridge
+  # Isolated network for sandbox containers
+  sandbox-network:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.30.0.0/16
+    labels:
+      agentic.type: sandbox-network
+      agentic.managed: "true"

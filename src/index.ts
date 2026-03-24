@@ -18,9 +18,11 @@ import workspaceRoutes from './routes/workspace.js';
 import systemRoutes from './routes/system.js';
 import authRoutes from './routes/auth.js';
 import memoryRoutes from './routes/memory.js';
+import sandboxRoutes from './routes/sandbox.js';
 
 import fs from 'fs/promises';
 import path from 'path';
+import { sandboxManager, resourceMonitor } from './sandbox/index.js';
 
 const logger = createLogger('Server');
 
@@ -69,6 +71,7 @@ app.route('/api/workspace', workspaceRoutes);
 app.route('/api/system', systemRoutes);
 app.route('/api/auth', authRoutes);
 app.route('/api/memory', memoryRoutes);
+app.route('/api/sandbox', sandboxRoutes);
 
 // ============================================================
 // HEALTH CHECK — Enhanced with detailed system state
@@ -76,7 +79,11 @@ app.route('/api/memory', memoryRoutes);
 app.get('/api/health', (c) => {
   return c.json({
     status: 'ok',
-    version: '1.1.0',
+    version: '1.7.0',
+    sandbox: {
+      dockerAvailable: sandboxManager.isDockerAvailable(),
+      runningContainers: sandboxManager.getRunningCount(),
+    },
     uptime: process.uptime(),
     timestamp: new Date().toISOString(),
     memory: {
@@ -132,19 +139,32 @@ app.get('*', async (c) => {
 // ============================================================
 async function startup() {
   console.log('');
-  console.log('  Agentic RAG Platform v1.1.0');
+  console.log('  Agentic RAG Platform v1.7.0 — Sandbox Isolation');
   console.log('  Starting up...');
   console.log('');
 
   logger.info('╔══════════════════════════════════════╗');
-  logger.info('║   Agentic RAG Platform v1.1.0       ║');
-  logger.info('║   MoE · Hybrid RAG · 45+ Tools      ║');
-  logger.info('║   GenUI · WebSocket · Graph Orch.    ║');
+  logger.info('║   Agentic RAG Platform v1.7.0       ║');
+  logger.info('║   MoE · Hybrid RAG · 55+ Tools      ║');
+  logger.info('║   Sandbox Isolation · Docker         ║');
   logger.info('╚══════════════════════════════════════╝');
   logger.info('');
 
   // Initialize tools
   initializeTools();
+
+  // Initialize sandbox manager (Docker container isolation)
+  try {
+    await sandboxManager.initialize();
+    if (sandboxManager.isDockerAvailable()) {
+      resourceMonitor.start(60000); // Collect metrics every 60s
+      logger.info('✅ Docker sandbox isolation enabled');
+    } else {
+      logger.warn('⚠ Docker not available — running in host mode (no sandbox isolation)');
+    }
+  } catch (err: any) {
+    logger.warn(`Sandbox init skipped: ${err.message}`);
+  }
 
   // Test database connection (non-blocking — app works without it)
   const dbConnected = await testConnection();

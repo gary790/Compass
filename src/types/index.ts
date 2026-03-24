@@ -111,7 +111,7 @@ export interface ToolDefinition {
 
 export type ToolCategory = 
   | 'file' | 'shell' | 'git' | 'github' | 'deploy' 
-  | 'web' | 'code' | 'database' | 'rag' | 'image' | 'system';
+  | 'web' | 'code' | 'database' | 'rag' | 'image' | 'system' | 'sandbox';
 
 export interface ToolExecutionRequest {
   toolName: string;

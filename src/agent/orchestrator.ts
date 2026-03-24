@@ -44,7 +44,9 @@ ORCHESTRATION RULES:
 5. Always summarise what you did and any remaining next steps.
 6. Keep tool outputs concise — truncate large results.
 7. When a tool errors, explain the issue and try an alternative approach.
-8. For dangerous operations, explain the risk before executing.`,
+8. For dangerous operations, explain the risk before executing.
+9. Workspaces run inside sandboxed Docker containers. Use sandbox_status to check isolation. 
+10. Commands execute inside the container — files and processes are isolated per workspace.`,
     llmConfig: { provider: 'openai', model: 'gpt-4o', temperature: 0.7, maxTokens: 4096 },
     tools: [], // Gets ALL tools
     maxIterations: 25,
@@ -77,6 +79,7 @@ ORCHESTRATION RULES:
       'read_file', 'write_file', 'edit_file', 'list_directory', 'search_files', 'create_directory',
       'shell_exec', 'npm_install', 'npm_run', 'code_generate', 'code_analyze', 'code_test', 'code_refactor',
       'git_status', 'git_commit',
+      'sandbox_status', 'sandbox_logs',
     ],
     maxIterations: 15,
   },

@@ -235,6 +235,22 @@ export const workspaceConfig = {
 };
 
 // ============================================================
+// SANDBOX CONFIG — Docker container isolation
+// ============================================================
+export const sandboxConfigRef = {
+  dockerSocket: env('DOCKER_SOCKET', '/var/run/docker.sock'),
+  baseImage: env('SANDBOX_IMAGE', 'agentic-sandbox:latest'),
+  networkName: env('SANDBOX_NETWORK', 'sandbox-network'),
+  defaultCpuLimit: parseFloat(env('SANDBOX_CPU_LIMIT', '1.0')),
+  defaultMemoryMB: envInt('SANDBOX_MEMORY_MB', 512),
+  defaultDiskMB: envInt('SANDBOX_DISK_MB', 1024),
+  maxContainers: envInt('SANDBOX_MAX_CONTAINERS', 20),
+  idleTimeoutMs: envInt('SANDBOX_IDLE_TIMEOUT_MS', 1800000), // 30 min
+  portRangeStart: envInt('SANDBOX_PORT_START', 4000),
+  portRangeEnd: envInt('SANDBOX_PORT_END', 4100),
+};
+
+// ============================================================
 // AGENT CONFIG
 // ============================================================
 export const agentConfig = {

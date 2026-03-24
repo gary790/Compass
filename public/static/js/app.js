@@ -96,6 +96,11 @@ function switchSidebar(name) {
       content.innerHTML = buildMemoryPanel();
       loadMemoryData();
       break;
+    case 'sandbox':
+      title.textContent = 'Sandbox Isolation';
+      content.innerHTML = buildSandboxPanel();
+      loadSandboxData();
+      break;
     case 'workflows':
       title.textContent = 'Workflows';
       content.innerHTML = buildWorkflowsPanel();
@@ -346,6 +351,185 @@ function deleteFact(id) {
     .then(r => r.json()).then(res => {
       if (res.success) loadMemoryData();
     }).catch(() => {});
+}
+
+// ============================================================
+// SANDBOX PANEL — Docker container isolation UI
+// ============================================================
+function buildSandboxPanel() {
+  return `
+    <div class="space-y-3">
+      <!-- Docker Status -->
+      <div id="sandboxDockerStatus" class="flex items-center gap-2 px-3 py-2 rounded-lg bg-gray-50 border border-gray-100">
+        <i class="fas fa-docker text-blue-500"></i>
+        <span class="text-xs text-gray-500">Checking Docker...</span>
+      </div>
+
+      <!-- System Overview -->
+      <div id="sandboxOverview" class="grid grid-cols-2 gap-2">
+        <div class="bg-white rounded-lg p-2 border border-gray-100 text-center">
+          <div class="text-lg font-bold text-blue-600" id="sbxRunning">—</div>
+          <div class="text-[10px] text-gray-400">Running</div>
+        </div>
+        <div class="bg-white rounded-lg p-2 border border-gray-100 text-center">
+          <div class="text-lg font-bold text-gray-600" id="sbxTotal">—</div>
+          <div class="text-[10px] text-gray-400">Total</div>
+        </div>
+        <div class="bg-white rounded-lg p-2 border border-gray-100 text-center">
+          <div class="text-lg font-bold text-green-600" id="sbxCPU">—</div>
+          <div class="text-[10px] text-gray-400">CPU %</div>
+        </div>
+        <div class="bg-white rounded-lg p-2 border border-gray-100 text-center">
+          <div class="text-lg font-bold text-purple-600" id="sbxMemory">—</div>
+          <div class="text-[10px] text-gray-400">Memory</div>
+        </div>
+      </div>
+
+      <!-- Actions -->
+      <div class="flex gap-1">
+        <button onclick="createSandbox()" class="flex-1 px-2 py-1.5 bg-blue-500 text-white text-xs rounded-lg hover:bg-blue-600 transition">
+          <i class="fas fa-plus mr-1"></i>New Sandbox
+        </button>
+        <button onclick="loadSandboxData()" class="px-2 py-1.5 bg-gray-100 text-gray-600 text-xs rounded-lg hover:bg-gray-200 transition">
+          <i class="fas fa-sync-alt"></i>
+        </button>
+      </div>
+
+      <!-- Container List -->
+      <div class="text-[10px] text-gray-400 uppercase font-semibold tracking-wider">Containers</div>
+      <div id="sandboxList" class="space-y-2">
+        <div class="text-xs text-gray-400 py-4 text-center">Loading...</div>
+      </div>
+
+      <!-- Port Range Info -->
+      <div id="sandboxPortInfo" class="text-[10px] text-gray-400 text-center pt-2 border-t border-gray-100">
+        Preview ports: 4000-4100
+      </div>
+    </div>`;
+}
+
+async function loadSandboxData() {
+  try {
+    const resp = await fetch('/api/sandbox');
+    const data = await resp.json();
+    if (!data.success) return;
+
+    const { overview, dockerAvailable, sandboxes } = data.data;
+
+    // Docker status
+    const statusEl = document.getElementById('sandboxDockerStatus');
+    if (statusEl) {
+      if (dockerAvailable) {
+        statusEl.innerHTML = '<i class="fas fa-check-circle text-green-500"></i><span class="text-xs text-green-700 font-medium">Docker Connected</span><span class="text-[10px] text-gray-400 ml-auto">Isolation Active</span>';
+        statusEl.className = 'flex items-center gap-2 px-3 py-2 rounded-lg bg-green-50 border border-green-100';
+      } else {
+        statusEl.innerHTML = '<i class="fas fa-exclamation-triangle text-yellow-500"></i><span class="text-xs text-yellow-700 font-medium">Host Mode</span><span class="text-[10px] text-gray-400 ml-auto">No Docker</span>';
+        statusEl.className = 'flex items-center gap-2 px-3 py-2 rounded-lg bg-yellow-50 border border-yellow-100';
+      }
+    }
+
+    // Overview stats
+    if (overview) {
+      const setT = (id, v) => { const e = document.getElementById(id); if (e) e.textContent = v; };
+      setT('sbxRunning', overview.runningContainers);
+      setT('sbxTotal', overview.totalContainers);
+      setT('sbxCPU', overview.averageCPU.toFixed(1) + '%');
+      setT('sbxMemory', overview.totalMemoryMB + 'MB');
+    }
+
+    // Container list
+    const listEl = document.getElementById('sandboxList');
+    if (!listEl) return;
+
+    if (!sandboxes || sandboxes.length === 0) {
+      listEl.innerHTML = '<div class="text-xs text-gray-400 py-4 text-center"><i class="fas fa-cube text-gray-300 text-2xl mb-2 block"></i>No sandbox containers.<br>Create one to enable isolation.</div>';
+      return;
+    }
+
+    listEl.innerHTML = sandboxes.map(function(s) {
+      var statusColors = {
+        running: 'bg-green-500', stopped: 'bg-gray-400', paused: 'bg-yellow-500',
+        failed: 'bg-red-500', creating: 'bg-blue-400', destroyed: 'bg-gray-300',
+      };
+      var dotColor = statusColors[s.status] || 'bg-gray-400';
+      var isRunning = s.status === 'running';
+      var cpu = s.metrics && s.metrics.cpuUsagePercent ? s.metrics.cpuUsagePercent.toFixed(1) : '0';
+      var mem = s.metrics ? (s.metrics.memoryUsageMB || 0) : 0;
+      var label = s.containerName || s.workspaceId;
+      var badgeClass = isRunning ? 'bg-green-50 text-green-700' : 'bg-gray-50 text-gray-500';
+
+      var actions = '';
+      if (isRunning) {
+        actions = '<button onclick="sandboxAction(\'' + s.workspaceId + '\',\'stop\')" class="flex-1 text-[10px] px-1.5 py-1 bg-gray-100 text-gray-600 rounded hover:bg-gray-200 transition"><i class="fas fa-stop mr-0.5"></i>Stop</button>' +
+          '<button onclick="sandboxAction(\'' + s.workspaceId + '\',\'restart\')" class="flex-1 text-[10px] px-1.5 py-1 bg-blue-50 text-blue-600 rounded hover:bg-blue-100 transition"><i class="fas fa-redo mr-0.5"></i>Restart</button>';
+      } else {
+        actions = '<button onclick="sandboxAction(\'' + s.workspaceId + '\',\'start\')" class="flex-1 text-[10px] px-1.5 py-1 bg-green-50 text-green-600 rounded hover:bg-green-100 transition"><i class="fas fa-play mr-0.5"></i>Start</button>';
+      }
+      actions += '<button onclick="sandboxAction(\'' + s.workspaceId + '\',\'destroy\')" class="text-[10px] px-1.5 py-1 bg-red-50 text-red-500 rounded hover:bg-red-100 transition" title="Destroy"><i class="fas fa-trash"></i></button>';
+
+      return '<div class="bg-white rounded-lg border border-gray-100 p-2.5 hover:border-gray-200 transition">' +
+        '<div class="flex items-center gap-2 mb-1.5">' +
+          '<div class="w-2 h-2 rounded-full ' + dotColor + '"></div>' +
+          '<span class="text-xs font-medium text-gray-700 flex-1 truncate">' + label + '</span>' +
+          '<span class="text-[10px] px-1.5 py-0.5 rounded-full ' + badgeClass + '">' + s.status + '</span>' +
+        '</div>' +
+        '<div class="grid grid-cols-3 gap-1 mb-1.5 text-[10px] text-gray-500">' +
+          '<div><i class="fas fa-microchip text-blue-400 mr-0.5"></i>' + cpu + '%</div>' +
+          '<div><i class="fas fa-memory text-purple-400 mr-0.5"></i>' + mem + 'MB</div>' +
+          '<div><i class="fas fa-network-wired text-gray-400 mr-0.5"></i>:' + (s.port || '—') + '</div>' +
+        '</div>' +
+        '<div class="flex gap-1">' + actions + '</div>' +
+      '</div>';
+    }).join('');
+
+    // Port info
+    if (overview && overview.portRange) {
+      var portEl = document.getElementById('sandboxPortInfo');
+      if (portEl) portEl.textContent = 'Ports: ' + overview.portRange.start + '-' + overview.portRange.end + ' (' + overview.portRange.used + ' used)';
+    }
+  } catch (err) {
+    var listEl2 = document.getElementById('sandboxList');
+    if (listEl2) listEl2.innerHTML = '<div class="text-xs text-red-400 py-2">Failed to load sandbox data</div>';
+  }
+}
+
+async function createSandbox() {
+  var wsId = currentWorkspace || 'default';
+  try {
+    var resp = await fetch('/api/sandbox', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ workspaceId: wsId }),
+    });
+    var data = await resp.json();
+    if (data.success) {
+      loadSandboxData();
+    } else {
+      alert(data.error?.message || 'Failed to create sandbox');
+    }
+  } catch (err) {
+    alert('Error creating sandbox: ' + err.message);
+  }
+}
+
+async function sandboxAction(workspaceId, action) {
+  if (action === 'destroy' && !confirm('Destroy sandbox for ' + workspaceId + '? Container will be removed (files preserved).')) return;
+
+  try {
+    var method = action === 'destroy' ? 'DELETE' : 'POST';
+    var url = action === 'destroy'
+      ? '/api/sandbox/' + workspaceId
+      : '/api/sandbox/' + workspaceId + '/' + action;
+    var resp = await fetch(url, { method: method });
+    var data = await resp.json();
+    if (data.success) {
+      loadSandboxData();
+    } else {
+      alert(data.error?.message || 'Failed to ' + action + ' sandbox');
+    }
+  } catch (err) {
+    alert('Error: ' + err.message);
+  }
 }
 
 function buildAgentsPanel() {

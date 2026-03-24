@@ -1,0 +1,54 @@
+# ============================================================
+# SANDBOX CONTAINER IMAGE — Isolated workspace environment
+# Each workspace gets its own container with:
+#   - Node.js 20 + npm + git
+#   - Restricted capabilities (no-new-privileges)
+#   - Resource limits enforced by Docker
+#   - /workspace mounted from host
+# ============================================================
+FROM node:20-alpine
+
+# Install common dev tools
+RUN apk add --no-cache \
+  git \
+  curl \
+  bash \
+  openssh-client \
+  python3 \
+  make \
+  g++ \
+  jq \
+  tree \
+  && rm -rf /var/cache/apk/*
+
+# Create sandbox user (non-root)
+RUN addgroup -S sandbox && adduser -S sandbox -G sandbox
+
+# Create workspace directory
+RUN mkdir -p /workspace /home/sandbox/.npm && \
+    chown -R sandbox:sandbox /workspace /home/sandbox
+
+# Global npm config for sandbox user
+RUN npm config set prefix /home/sandbox/.npm-global && \
+    echo 'export PATH="/home/sandbox/.npm-global/bin:$PATH"' >> /home/sandbox/.bashrc
+
+# Install commonly-needed global tools
+RUN npm install -g \
+  typescript \
+  tsx \
+  prettier \
+  eslint \
+  2>/dev/null || true
+
+# Switch to sandbox user
+USER sandbox
+WORKDIR /workspace
+
+# Environment setup
+ENV HOME=/home/sandbox
+ENV NODE_ENV=development
+ENV NPM_CONFIG_PREFIX=/home/sandbox/.npm-global
+ENV PATH="/home/sandbox/.npm-global/bin:$PATH"
+
+# Keep container alive with a shell
+CMD ["sh", "-c", "echo 'Sandbox ready' && tail -f /dev/null"]

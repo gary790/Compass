@@ -11,6 +11,7 @@ import './code/index.js';
 import './db/index.js';
 import './rag/index.js';
 import './memory/index.js';
+import './sandbox/index.js';
 
 import { toolRegistry } from './registry.js';
 import { createLogger } from '../utils/index.js';
