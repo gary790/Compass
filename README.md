@@ -1,4 +1,4 @@
-# Agentic RAG Platform v1.1.0
+# Agentic RAG Platform v1.5.0
 
 A self-hosted, production-ready AI development platform featuring Mixture-of-Experts (MoE) LLM routing, Hybrid RAG with Reciprocal Rank Fusion, 45+ tools, GenUI streaming dashboard, WebSocket real-time events, and graph-based agent orchestration.
 
@@ -31,7 +31,7 @@ A self-hosted, production-ready AI development platform featuring Mixture-of-Exp
 
 ## Features
 
-### Completed (v1.4.0)
+### Completed (v1.5.0)
 
 - **Mixture-of-Experts (MoE) LLM Router** — 6 providers: OpenAI, Anthropic, Google, Mistral, Groq, Ollama
   - Automatic model selection based on task type (code, review, RAG, planning)
@@ -95,6 +95,16 @@ A self-hosted, production-ready AI development platform featuring Mixture-of-Exp
   - WebSocket-driven: approval response sent via WS, orchestrator awaits
   - Card updates in-place on approval/rejection
   - Tools requiring approval: deploy, git push, GitHub ops, DB write, file delete, RAG delete
+
+- **Multi-Agent Parallel Execution** (v1.5.0)
+  - LLM-powered Planner decomposes complex requests into sub-tasks with agent assignments
+  - ParallelExecutor runs 2-4 agent lanes concurrently (code + design + test + reviewer)
+  - Dependency graph: tasks can depend on others (e.g., test waits for code to finish)
+  - Each lane has its own ReAct loop, message context, repair engine, and tool access
+  - Merger/Synthesiser: LLM combines all lane outputs into a unified response
+  - Graceful fallback: if planner fails or request is simple, uses single-agent mode
+  - Frontend: color-coded agent badges in trace panel (blue=code, pink=design, green=test, etc.)
+  - Status badges show parallel execution progress and per-lane completion
 
 - **GenUI Streaming Dashboard**
   - Light-theme Tailwind CSS interface
@@ -245,6 +255,8 @@ webapp/
     index.ts              # Main server entry
     agent/
       orchestrator.ts     # Graph-based ReAct orchestrator
+      parallel.ts         # Multi-agent parallel executor + planner
+      repair.ts           # Autonomous error detection & auto-fix
     llm/
       router.ts           # MoE LLM router (6 providers)
     rag/
@@ -302,6 +314,8 @@ webapp/
 - Rate limiting middleware per user
 - Production deployment to Cloudflare (this is a Node.js app, not edge)
 - Edit-and-resubmit for approval cards (currently approve/reject only)
+- Inter-lane communication (agents can't message each other mid-execution)
+- Lane cancellation (can't cancel individual lanes)
 
 ## Recommended Next Steps
 
@@ -312,7 +326,8 @@ webapp/
 5. Add vision/image analysis tool support
 6. Rate-limit API endpoints per user
 7. Add editable arguments in approval cards
-8. Multi-client approval sync (show pending approvals on reconnect)
+8. Inter-lane messaging for coordinated parallel execution
+9. Lane cancellation and priority re-ordering
 
 ## Deployment
 

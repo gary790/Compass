@@ -6,6 +6,7 @@ import {
 import { callLLM, streamLLM } from '../llm/router.js';
 import { RepairEngine, DetectedError } from './repair.js';
 import { requestApproval } from '../routes/websocket.js';
+import { planExecution, ParallelExecutor } from './parallel.js';
 import { toolRegistry } from '../tools/index.js';
 import { getBestModelForTask, agentConfig } from '../config/index.js';
 import { createLogger, generateId, withTimeout, costTracker } from '../utils/index.js';
@@ -200,18 +201,72 @@ export class Orchestrator {
   }
 
   // ============================================================
-  // MAIN EXECUTION — Planner → Executor → (optional) Reviewer
+  // MAIN EXECUTION — Planner → Single or Parallel → Merger
   // ============================================================
   async execute(userMessage: string, conversationHistory: LLMMessage[] = []): Promise<string> {
     this.state.status = 'planning';
     logger.info(`Orchestrator starting for: "${userMessage.substring(0, 100)}..."`);
 
+    // === STEP 1: Plan — should we run parallel agents? ===
+    try {
+      const plan = await planExecution(userMessage, conversationHistory);
+
+      if (plan.parallel && plan.tasks.length > 1) {
+        logger.info(`Parallel plan accepted: ${plan.tasks.length} lanes`);
+        this.emit({
+          type: 'thinking',
+          data: {
+            content: `Planning parallel execution: ${plan.tasks.map(t => `${t.agentType}(${t.title})`).join(' + ')}`,
+            agentType: 'router',
+          },
+        });
+
+        const executor = new ParallelExecutor(
+          this.state.conversationId,
+          this.state.userId,
+          this.state.workspaceId,
+          this.onEvent,
+        );
+
+        const { finalResponse, laneResults } = await executor.executePlan(
+          plan,
+          userMessage,
+          conversationHistory,
+        );
+
+        // Aggregate stats
+        const usage = executor.getUsage();
+        this.totalTokens += usage.totalTokens;
+        this.totalCostUSD += usage.totalCostUSD;
+        usage.modelsUsed.forEach(m => this.modelsUsed.add(m));
+        usage.toolsUsed.forEach(t => this.toolsUsed.add(t));
+        this.state.iteration = laneResults.reduce((sum, r) => sum + r.iterations, 0);
+
+        // Emit done
+        this.state.status = 'complete';
+        const doneUsage = {
+          totalTokens: this.totalTokens,
+          totalCostUSD: this.totalCostUSD,
+          totalDurationMs: Date.now() - this.state.startedAt,
+          modelsUsed: Array.from(this.modelsUsed),
+          toolsUsed: Array.from(this.toolsUsed),
+        };
+        this.emit({ type: 'done', data: { summary: finalResponse.substring(0, 300), usage: doneUsage } });
+
+        logger.info(`Parallel execution complete: ${laneResults.length} lanes, ${this.totalTokens} tokens, $${this.totalCostUSD.toFixed(6)}`);
+        return finalResponse;
+      }
+    } catch (planError: any) {
+      logger.warn(`Planner error: ${planError.message} — falling back to single agent`);
+    }
+
+    // === STEP 2: Single-agent mode (current behaviour) ===
     // Detect which agent best handles this request
     const primaryAgent = detectPrimaryAgent(userMessage);
     const agentDef = AGENT_DEFINITIONS[primaryAgent];
     const model = this.resolveModel(agentDef);
 
-    logger.info(`Primary agent: ${primaryAgent} (${model.provider}/${model.model})`);
+    logger.info(`Single agent: ${primaryAgent} (${model.provider}/${model.model})`);
     this.emit({ type: 'thinking', data: { content: `Routing to ${agentDef.name}...`, agentType: primaryAgent } });
 
     // Determine available tools

@@ -674,10 +674,13 @@ function sendQuickAction(msg) {
 // ============================================================
 function handleSSEEvent(event, contentDiv, tracePanel) {
   switch (event.type) {
-    case 'thinking':
-      addTraceItem(tracePanel, event.data.content, 'fas fa-brain', 'text-purple-500');
+    case 'thinking': {
+      const agentLabel = event.data.agentType && event.data.agentType !== 'router'
+        ? `<span class="font-mono text-xs px-1 rounded ${agentBadgeColor(event.data.agentType)}">${event.data.agentType}</span> ` : '';
+      addTraceItem(tracePanel, agentLabel + event.data.content, 'fas fa-brain', 'text-purple-500');
       showThinking(contentDiv, event.data.content);
       break;
+    }
     case 'text':
       removeThinking(contentDiv);
       if (event.data.delta) {
@@ -693,12 +696,15 @@ function handleSSEEvent(event, contentDiv, tracePanel) {
         streamedText = '';  // Reset for next iteration
       }
       break;
-    case 'tool_call':
+    case 'tool_call': {
+      const tcAgent = event.data.agentType && event.data.agentType !== 'router'
+        ? `<span class="font-mono text-xs px-1 rounded ${agentBadgeColor(event.data.agentType)}">${event.data.agentType}</span> ` : '';
       addTraceItem(tracePanel,
-        `<span class="text-yellow-600 font-semibold">${event.data.toolName}</span>(${truncateArgs(event.data.toolArgs)})`,
+        `${tcAgent}<span class="text-yellow-600 font-semibold">${event.data.toolName}</span>(${truncateArgs(event.data.toolArgs)})`,
         'fas fa-wrench', 'text-yellow-500');
       showToolCall(contentDiv, event.data.toolName, event.data.toolArgs);
       break;
+    }
     case 'tool_result':
       addTraceItem(tracePanel,
         `${event.data.toolName}: ${event.data.success ? '<span class="text-green-600">OK</span>' : '<span class="text-red-500">Fail</span>'} (${event.data.durationMs}ms)`,
@@ -709,11 +715,23 @@ function handleSSEEvent(event, contentDiv, tracePanel) {
     case 'component':
       renderGenUIComponent(contentDiv, event.data);
       // Add trace item for repair-related status badges
-      if (event.data.name === 'status_badge' && event.data.props?.label === 'Auto-Repair') {
+      if (event.data.name === 'status_badge') {
         const s = event.data.props.status;
-        const icon = s === 'running' ? 'fas fa-tools' : s === 'success' ? 'fas fa-check-double' : 'fas fa-exclamation-circle';
-        const color = s === 'running' ? 'text-yellow-500' : s === 'success' ? 'text-green-500' : 'text-red-500';
-        addTraceItem(tracePanel, `<span class="font-semibold">Repair:</span> ${event.data.props.detail || s}`, icon, color);
+        const lbl = event.data.props.label || '';
+        if (lbl === 'Auto-Repair') {
+          const icon = s === 'running' ? 'fas fa-tools' : s === 'success' ? 'fas fa-check-double' : 'fas fa-exclamation-circle';
+          const color = s === 'running' ? 'text-yellow-500' : s === 'success' ? 'text-green-500' : 'text-red-500';
+          addTraceItem(tracePanel, `<span class="font-semibold">Repair:</span> ${event.data.props.detail || s}`, icon, color);
+        } else if (lbl === 'Parallel Execution') {
+          const icon = s === 'running' ? 'fas fa-project-diagram' : s === 'success' ? 'fas fa-check-double' : 'fas fa-exclamation-circle';
+          const color = s === 'running' ? 'text-blue-500' : s === 'success' ? 'text-green-500' : 'text-red-500';
+          addTraceItem(tracePanel, `<span class="font-semibold">Parallel:</span> ${event.data.props.detail || s}`, icon, color);
+        } else {
+          // Agent lane status badges (CODE, DESIGN, TEST, etc.)
+          const icon = s === 'running' ? 'fas fa-spinner fa-spin' : s === 'success' ? 'fas fa-check-circle' : 'fas fa-times-circle';
+          const color = s === 'success' ? 'text-green-500' : s === 'failed' ? 'text-red-500' : 'text-blue-500';
+          addTraceItem(tracePanel, `<span class="font-mono text-xs px-1 rounded ${agentBadgeColor(lbl.toLowerCase())}">${lbl}</span> ${event.data.props.detail || s}`, icon, color);
+        }
       }
       break;
     case 'approval':
@@ -1097,6 +1115,18 @@ async function loadSystemInfo() {
 // UTILITIES
 // ============================================================
 function escapeHtml(t) { const d = document.createElement('div'); d.textContent = t; return d.innerHTML; }
+function agentBadgeColor(agent) {
+  const colors = {
+    code: 'bg-blue-100 text-blue-700',
+    design: 'bg-pink-100 text-pink-700',
+    test: 'bg-green-100 text-green-700',
+    reviewer: 'bg-orange-100 text-orange-700',
+    deploy: 'bg-purple-100 text-purple-700',
+    rag: 'bg-yellow-100 text-yellow-700',
+    router: 'bg-gray-100 text-gray-700',
+  };
+  return colors[agent] || colors.router;
+}
 function renderMarkdown(t) { if (!t) return ''; try { return marked.parse(t); } catch { return escapeHtml(t); } }
 function truncateArgs(a) { const s = typeof a === 'string' ? a : JSON.stringify(a); return s.length > 80 ? s.substring(0,80)+'...' : s; }
 function formatSize(b) { if (!b) return '0 B'; if (b < 1024) return b+' B'; if (b < 1048576) return (b/1024).toFixed(1)+' KB'; return (b/1048576).toFixed(1)+' MB'; }
