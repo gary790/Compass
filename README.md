@@ -57,7 +57,7 @@ A self-hosted, production-ready AI development platform featuring Mixture-of-Exp
   - Query expansion (keyword extraction)
   - Contextual compression (prune irrelevant sentences)
 
-- **45 Tools across 10 categories**
+- **51+ Tools across 10 categories**
   - File: read, write, edit, list, delete, search, info, mkdir
   - Shell: exec, npm install, npm run, process list
   - System: system info
@@ -68,6 +68,7 @@ A self-hosted, production-ready AI development platform featuring Mixture-of-Exp
   - Code: analyze, explain, generate, test, refactor
   - Database: query (read), execute (write), schema
   - RAG: ingest, query, list docs, delete doc
+  - Memory: search, log decision, get context, add fact, scan workspace, list decisions
 
 - **Conversation Persistence** (v1.3.0)
   - PostgreSQL storage with in-memory fallback
@@ -326,6 +327,8 @@ webapp/
 5. Add vision/image analysis tool support
 6. Rate-limit API endpoints per user
 7. Add editable arguments in approval cards
+8. Add LLM-generated file summaries during memory scan
+9. Cross-conversation memory retrieval (search across all conversations)
 8. Inter-lane messaging for coordinated parallel execution
 9. Lane cancellation and priority re-ordering
 

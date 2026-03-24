@@ -11,6 +11,7 @@ import { toolRegistry } from '../tools/index.js';
 import { getBestModelForTask, agentConfig } from '../config/index.js';
 import { createLogger, generateId, withTimeout, costTracker } from '../utils/index.js';
 import { eventBus } from '../utils/index.js';
+import { getProjectMemoryLoaded } from '../memory/hub.js';
 
 const logger = createLogger('Orchestrator');
 
@@ -57,7 +58,9 @@ ORCHESTRATION RULES:
 2. If the KB lacks information, fall back to web_search.
 3. Summarise findings and cite sources.`,
     llmConfig: { provider: 'openai', model: 'gpt-4o-mini', temperature: 0.3, maxTokens: 2048 },
-    tools: ['rag_query', 'rag_list_docs', 'rag_ingest', 'web_search', 'web_scrape'],
+    tools: ['rag_query', 'rag_list_docs', 'rag_ingest', 'web_search', 'web_scrape',
+            'memory_search', 'memory_get_context', 'memory_log_decision', 'memory_add_fact',
+            'memory_scan_workspace', 'memory_list_decisions'],
     maxIterations: 5,
   },
   code: {
@@ -275,9 +278,21 @@ export class Orchestrator {
       ? allTools  // router gets everything
       : allTools.filter(t => t && agentDef.tools.includes(t.function.name));
 
-    // Build messages
+    // Build messages — inject project memory context
+    let systemPrompt = agentDef.systemPrompt;
+    try {
+      const memory = await getProjectMemoryLoaded(this.state.workspaceId);
+      const memoryContext = memory.buildContext(userMessage);
+      if (memoryContext) {
+        systemPrompt += '\n\n' + memoryContext;
+        logger.info(`Injected project memory context (${memoryContext.length} chars)`);
+      }
+    } catch (err: any) {
+      logger.warn(`Memory context injection failed: ${err.message}`);
+    }
+
     const messages: LLMMessage[] = [
-      { role: 'system', content: agentDef.systemPrompt },
+      { role: 'system', content: systemPrompt },
       ...conversationHistory.slice(-20), // keep last 20 history messages
       { role: 'user', content: userMessage },
     ];
@@ -377,6 +392,14 @@ export class Orchestrator {
               });
             }
           }
+
+          // === AUTO-LOG DECISIONS from tool results ===
+          try {
+            const memory = await getProjectMemoryLoaded(this.state.workspaceId);
+            for (const tr of allToolResults) {
+              memory.extractDecisionFromToolResult(tr.toolName, tr.output || {}, tr.success, primaryAgent);
+            }
+          } catch { /* memory not critical */ }
 
           // === REPAIR LOOP: Scan tool results for auto-fixable errors ===
           const repairResult = this.repairEngine.scanToolResults(allToolResults);

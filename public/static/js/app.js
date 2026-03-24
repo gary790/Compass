@@ -91,6 +91,11 @@ function switchSidebar(name) {
       content.innerHTML = '<div class="text-xs text-gray-400 py-4">Loading tools...</div>';
       loadToolsList();
       break;
+    case 'memory':
+      title.textContent = 'Project Memory';
+      content.innerHTML = buildMemoryPanel();
+      loadMemoryData();
+      break;
     case 'workflows':
       title.textContent = 'Workflows';
       content.innerHTML = buildWorkflowsPanel();
@@ -106,6 +111,241 @@ function closeSidePanel() {
     });
   }
   activeSidebar = null;
+}
+
+// ============================================================
+// MEMORY HUB PANEL
+// ============================================================
+function buildMemoryPanel() {
+  return `
+    <div class="space-y-3">
+      <!-- Stats Summary -->
+      <div id="memoryStats" class="grid grid-cols-2 gap-2">
+        <div class="bg-white rounded-lg p-2 border border-gray-100 text-center">
+          <div class="text-lg font-bold text-indigo-600" id="memStatFiles">—</div>
+          <div class="text-[10px] text-gray-400">Files</div>
+        </div>
+        <div class="bg-white rounded-lg p-2 border border-gray-100 text-center">
+          <div class="text-lg font-bold text-violet-600" id="memStatDecisions">—</div>
+          <div class="text-[10px] text-gray-400">Decisions</div>
+        </div>
+        <div class="bg-white rounded-lg p-2 border border-gray-100 text-center">
+          <div class="text-lg font-bold text-emerald-600" id="memStatFacts">—</div>
+          <div class="text-[10px] text-gray-400">Facts</div>
+        </div>
+        <div class="bg-white rounded-lg p-2 border border-gray-100 text-center">
+          <div class="text-lg font-bold text-amber-600" id="memStatEmbedded">—</div>
+          <div class="text-[10px] text-gray-400">Embedded</div>
+        </div>
+      </div>
+
+      <!-- Scan Button -->
+      <button onclick="scanWorkspaceMemory()" class="w-full flex items-center justify-center gap-2 px-3 py-2 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 rounded-lg text-xs font-medium transition">
+        <i class="fas fa-sync-alt" id="memoryScanIcon"></i>
+        <span id="memoryScanLabel">Scan Workspace</span>
+      </button>
+
+      <!-- Semantic Search -->
+      <div class="relative">
+        <input id="memorySearchInput" type="text" placeholder="Search memory..." 
+          class="w-full pl-8 pr-3 py-2 text-xs bg-white border border-gray-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-indigo-300"
+          onkeydown="if(event.key==='Enter')searchMemory()">
+        <i class="fas fa-search absolute left-2.5 top-2.5 text-gray-300 text-xs"></i>
+      </div>
+      <div id="memorySearchResults" class="space-y-1 hidden"></div>
+
+      <!-- Tech Stack -->
+      <div class="border-t border-gray-100 pt-2">
+        <div class="text-[10px] font-semibold text-gray-500 uppercase tracking-wider mb-1">Tech Stack</div>
+        <div id="memoryTechStack" class="text-xs text-gray-500">Not scanned yet</div>
+      </div>
+
+      <!-- Facts List -->
+      <div class="border-t border-gray-100 pt-2">
+        <div class="flex items-center justify-between mb-1">
+          <div class="text-[10px] font-semibold text-gray-500 uppercase tracking-wider">Context Facts</div>
+          <button onclick="toggleAddFact()" class="text-[10px] text-indigo-500 hover:text-indigo-700"><i class="fas fa-plus"></i></button>
+        </div>
+        <div id="addFactForm" class="hidden mb-2 space-y-1">
+          <select id="factCategory" class="w-full text-xs border border-gray-200 rounded px-2 py-1">
+            <option value="convention">Convention</option>
+            <option value="architecture">Architecture</option>
+            <option value="constraint">Constraint</option>
+            <option value="preference">Preference</option>
+            <option value="tech_stack">Tech Stack</option>
+            <option value="environment">Environment</option>
+          </select>
+          <input id="factText" type="text" placeholder="e.g. API uses camelCase JSON" class="w-full text-xs border border-gray-200 rounded px-2 py-1">
+          <button onclick="addMemoryFact()" class="w-full text-xs bg-indigo-500 text-white rounded px-2 py-1 hover:bg-indigo-600">Add Fact</button>
+        </div>
+        <div id="memoryFactsList" class="space-y-1 max-h-40 overflow-y-auto"></div>
+      </div>
+
+      <!-- Decision Timeline -->
+      <div class="border-t border-gray-100 pt-2">
+        <div class="text-[10px] font-semibold text-gray-500 uppercase tracking-wider mb-1">Recent Decisions</div>
+        <div id="memoryDecisionsList" class="space-y-1 max-h-48 overflow-y-auto"></div>
+      </div>
+    </div>
+  `;
+}
+
+function loadMemoryData() {
+  // Load snapshot
+  fetch('/api/memory/snapshot?workspaceId=' + encodeURIComponent(currentWorkspace || './workspaces/default'))
+    .then(r => r.json()).then(res => {
+      if (!res.success) return;
+      const d = res.data;
+      const el = id => document.getElementById(id);
+      if (el('memStatFiles')) el('memStatFiles').textContent = d.stats.totalFiles;
+      if (el('memStatDecisions')) el('memStatDecisions').textContent = d.stats.totalDecisions;
+      if (el('memStatFacts')) el('memStatFacts').textContent = d.stats.totalFacts;
+      if (el('memStatEmbedded')) el('memStatEmbedded').textContent = d.stats.indexedFiles;
+      // Tech stack
+      if (d.techStack && el('memoryTechStack')) {
+        const ts = d.techStack;
+        const parts = [];
+        if (ts.frameworks.length) parts.push('<span class="text-indigo-600">' + ts.frameworks.join(', ') + '</span>');
+        if (ts.languages.length) parts.push(ts.languages.join(', '));
+        if (ts.databases.length) parts.push('<span class="text-emerald-600">' + ts.databases.join(', ') + '</span>');
+        if (ts.deployTarget) parts.push('<span class="text-amber-600">' + ts.deployTarget + '</span>');
+        el('memoryTechStack').innerHTML = parts.join(' · ') || 'Not detected';
+      }
+    }).catch(() => {});
+
+  // Load facts
+  fetch('/api/memory/facts?workspaceId=' + encodeURIComponent(currentWorkspace || './workspaces/default'))
+    .then(r => r.json()).then(res => {
+      if (!res.success || !res.data) return;
+      const list = document.getElementById('memoryFactsList');
+      if (!list) return;
+      if (res.data.length === 0) {
+        list.innerHTML = '<div class="text-xs text-gray-400 italic">No facts yet</div>';
+        return;
+      }
+      const catColors = { tech_stack:'bg-blue-50 text-blue-700', architecture:'bg-purple-50 text-purple-700', convention:'bg-green-50 text-green-700', constraint:'bg-red-50 text-red-700', preference:'bg-yellow-50 text-yellow-700', environment:'bg-gray-100 text-gray-700' };
+      list.innerHTML = res.data.slice(0, 30).map(f => `
+        <div class="flex items-start gap-1.5 group">
+          <span class="shrink-0 px-1.5 py-0.5 rounded text-[9px] font-medium ${catColors[f.category] || 'bg-gray-100 text-gray-600'}">${f.category.replace('_',' ')}</span>
+          <span class="text-xs text-gray-600 flex-1 leading-tight">${escapeHtml(f.fact)}</span>
+          <button onclick="deleteFact('${f.id}')" class="opacity-0 group-hover:opacity-100 text-red-300 hover:text-red-500 text-[10px] shrink-0"><i class="fas fa-times"></i></button>
+        </div>
+      `).join('');
+    }).catch(() => {});
+
+  // Load decisions
+  fetch('/api/memory/decisions?workspaceId=' + encodeURIComponent(currentWorkspace || './workspaces/default') + '&limit=20')
+    .then(r => r.json()).then(res => {
+      if (!res.success || !res.data) return;
+      const list = document.getElementById('memoryDecisionsList');
+      if (!list) return;
+      if (res.data.length === 0) {
+        list.innerHTML = '<div class="text-xs text-gray-400 italic">No decisions yet</div>';
+        return;
+      }
+      const typeIcons = { architecture:'fa-sitemap', implementation:'fa-code', fix:'fa-wrench', dependency:'fa-box', config:'fa-cog', refactor:'fa-recycle', deploy:'fa-rocket' };
+      const outcomeColors = { success:'text-green-500', failure:'text-red-500', partial:'text-amber-500' };
+      list.innerHTML = res.data.map(d => {
+        const icon = typeIcons[d.type] || 'fa-circle';
+        const time = new Date(d.timestamp).toLocaleDateString('en-US', {month:'short', day:'numeric', hour:'2-digit', minute:'2-digit'});
+        const outcomeIcon = d.outcome ? `<i class="fas ${d.outcome === 'success' ? 'fa-check-circle' : d.outcome === 'failure' ? 'fa-times-circle' : 'fa-exclamation-circle'} ${outcomeColors[d.outcome] || ''} text-[10px]"></i>` : '';
+        return `
+          <div class="flex items-start gap-1.5 py-1 border-b border-gray-50 last:border-0">
+            <i class="fas ${icon} text-[10px] text-gray-400 mt-0.5 shrink-0"></i>
+            <div class="flex-1 min-w-0">
+              <div class="flex items-center gap-1">
+                <span class="text-xs font-medium text-gray-700 truncate">${escapeHtml(d.title)}</span>
+                ${outcomeIcon}
+              </div>
+              <div class="text-[10px] text-gray-400">${time}</div>
+            </div>
+          </div>
+        `;
+      }).join('');
+    }).catch(() => {});
+}
+
+function scanWorkspaceMemory() {
+  const icon = document.getElementById('memoryScanIcon');
+  const label = document.getElementById('memoryScanLabel');
+  if (icon) icon.className = 'fas fa-sync-alt fa-spin';
+  if (label) label.textContent = 'Scanning...';
+
+  fetch('/api/memory/scan?workspaceId=' + encodeURIComponent(currentWorkspace || './workspaces/default'), { method: 'POST' })
+    .then(r => r.json()).then(res => {
+      if (icon) icon.className = 'fas fa-sync-alt';
+      if (label) label.textContent = 'Scan Workspace';
+      if (res.success) {
+        loadMemoryData(); // refresh
+      }
+    }).catch(() => {
+      if (icon) icon.className = 'fas fa-sync-alt';
+      if (label) label.textContent = 'Scan Workspace';
+    });
+}
+
+function searchMemory() {
+  const input = document.getElementById('memorySearchInput');
+  const resultsDiv = document.getElementById('memorySearchResults');
+  if (!input || !resultsDiv) return;
+  const query = input.value.trim();
+  if (!query) { resultsDiv.classList.add('hidden'); return; }
+
+  fetch('/api/memory/search?workspaceId=' + encodeURIComponent(currentWorkspace || './workspaces/default'), {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ query, topK: 8 }),
+  })
+    .then(r => r.json()).then(res => {
+      if (!res.success || !res.data || res.data.length === 0) {
+        resultsDiv.innerHTML = '<div class="text-xs text-gray-400 italic py-1">No results</div>';
+        resultsDiv.classList.remove('hidden');
+        return;
+      }
+      const typeColors = { decision:'text-violet-600', fact:'text-emerald-600', file:'text-blue-600' };
+      const typeIcons = { decision:'fa-gavel', fact:'fa-lightbulb', file:'fa-file-code' };
+      resultsDiv.innerHTML = res.data.map(r => `
+        <div class="flex items-start gap-1.5 py-1 border-b border-gray-50">
+          <i class="fas ${typeIcons[r.type] || 'fa-circle'} ${typeColors[r.type] || 'text-gray-400'} text-[10px] mt-1 shrink-0"></i>
+          <div class="flex-1 min-w-0">
+            <div class="text-xs text-gray-700 leading-tight">${escapeHtml(r.content.substring(0, 120))}</div>
+            <div class="text-[10px] text-gray-400">${r.type} · score: ${(r.score).toFixed(3)}</div>
+          </div>
+        </div>
+      `).join('');
+      resultsDiv.classList.remove('hidden');
+    }).catch(() => {});
+}
+
+function toggleAddFact() {
+  const form = document.getElementById('addFactForm');
+  if (form) form.classList.toggle('hidden');
+}
+
+function addMemoryFact() {
+  const category = document.getElementById('factCategory')?.value;
+  const fact = document.getElementById('factText')?.value?.trim();
+  if (!fact) return;
+
+  fetch('/api/memory/facts?workspaceId=' + encodeURIComponent(currentWorkspace || './workspaces/default'), {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ category, fact, confidence: 0.9, source: 'manual' }),
+  })
+    .then(r => r.json()).then(res => {
+      if (res.success) {
+        document.getElementById('factText').value = '';
+        document.getElementById('addFactForm')?.classList.add('hidden');
+        loadMemoryData();
+      }
+    }).catch(() => {});
+}
+
+function deleteFact(id) {
+  fetch('/api/memory/facts/' + id + '?workspaceId=' + encodeURIComponent(currentWorkspace || './workspaces/default'), { method: 'DELETE' })
+    .then(r => r.json()).then(res => {
+      if (res.success) loadMemoryData();
+    }).catch(() => {});
 }
 
 function buildAgentsPanel() {

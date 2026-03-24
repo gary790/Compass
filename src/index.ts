@@ -17,6 +17,7 @@ import ragRoutes from './routes/rag.js';
 import workspaceRoutes from './routes/workspace.js';
 import systemRoutes from './routes/system.js';
 import authRoutes from './routes/auth.js';
+import memoryRoutes from './routes/memory.js';
 
 import fs from 'fs/promises';
 import path from 'path';
@@ -67,6 +68,7 @@ app.route('/api/rag', ragRoutes);
 app.route('/api/workspace', workspaceRoutes);
 app.route('/api/system', systemRoutes);
 app.route('/api/auth', authRoutes);
+app.route('/api/memory', memoryRoutes);
 
 // ============================================================
 // HEALTH CHECK — Enhanced with detailed system state
