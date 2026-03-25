@@ -31,6 +31,19 @@ document.addEventListener('DOMContentLoaded', () => {
     },
     breaks: true,
   });
+
+  // Auto-start task if ?task= URL parameter is present
+  // (Used when navigating from /ai-agents page)
+  const urlParams = new URLSearchParams(window.location.search);
+  const autoTask = urlParams.get('task');
+  if (autoTask) {
+    // Clean up URL (remove ?task= param) without reloading
+    window.history.replaceState({}, '', '/');
+    // Small delay to let WebSocket connect and UI initialize
+    setTimeout(() => {
+      sendQuickAction(autoTask);
+    }, 500);
+  }
 });
 
 // ============================================================
