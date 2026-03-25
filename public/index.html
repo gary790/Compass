@@ -9,7 +9,6 @@
   <link href="https://cdn.jsdelivr.net/npm/highlight.js@11.9.0/styles/github.min.css" rel="stylesheet">
   <script src="https://cdn.jsdelivr.net/npm/marked@15.0.0/marked.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/highlight.js@11.9.0/highlight.min.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
   <style>
     * { scrollbar-width: thin; scrollbar-color: #cbd5e1 #f1f5f9; }
     ::-webkit-scrollbar { width: 5px; }
@@ -20,48 +19,18 @@
     @keyframes slide-in { from{opacity:0;transform:translateY(10px)} to{opacity:1;transform:translateY(0)} }
     .message-enter { animation: slide-in 0.3s ease-out; }
     pre code { font-size: 13px !important; line-height: 1.5 !important; }
-    .file-tree-item { cursor: pointer; padding: 3px 8px; border-radius: 4px; transition: background 0.15s; }
-    .file-tree-item:hover { background: rgba(99,102,241,0.08); }
-    .resize-handle { cursor: col-resize; width: 4px; background: transparent; transition: background 0.2s; position: relative; z-index: 10; }
-    .resize-handle:hover { background: #818cf8; }
 
     /* Sidebar icon buttons */
     .sidebar-btn {
       display: flex; flex-direction: column; align-items: center; gap: 2px;
       padding: 10px 4px; border-radius: 8px; transition: all 0.15s;
       cursor: pointer; width: 100%; color: #64748b; border: none; background: none;
+      text-decoration: none;
     }
     .sidebar-btn:hover { background: rgba(99,102,241,0.08); color: #334155; }
     .sidebar-btn.active { background: rgba(99,102,241,0.12); color: #6366f1; }
     .sidebar-btn i { font-size: 16px; line-height: 1; }
     .sidebar-btn span { font-size: 9px; font-weight: 500; letter-spacing: 0.02em; line-height: 1.2; }
-
-    /* Workspace tabs */
-    .ws-tab {
-      display: inline-flex; align-items: center; gap: 6px;
-      padding: 8px 14px; font-size: 13px; font-weight: 500;
-      color: #64748b; border-bottom: 2px solid transparent;
-      transition: all 0.15s; cursor: pointer; white-space: nowrap;
-      background: none; border-top: none; border-left: none; border-right: none;
-    }
-    .ws-tab:hover { color: #334155; background: rgba(0,0,0,0.02); }
-    .ws-tab.active { color: #7c3aed; border-bottom-color: #7c3aed; }
-    .ws-tab i { font-size: 12px; }
-
-    /* Address bar */
-    .address-bar {
-      display: flex; align-items: center; gap: 8px;
-      padding: 6px 12px; background: #f8fafc;
-      border: 1px solid #e2e8f0; border-radius: 8px;
-    }
-    .address-bar input { flex: 1; background: transparent; border: none; outline: none; font-size: 13px; color: #64748b; }
-    .address-bar button { color: #94a3b8; transition: color 0.15s; background: none; border: none; cursor: pointer; }
-    .address-bar button:hover { color: #334155; }
-
-    /* Panel visibility — use display instead of Tailwind 'hidden' to avoid !important conflicts */
-    .panel-hidden { display: none !important; }
-    .panel-flex { display: flex !important; }
-    .panel-block { display: block !important; }
 
     /* ===== HOME PAGE — Genspark-style centered layout ===== */
     .home-input-box {
@@ -129,77 +98,47 @@
       .sidebar-btn span { display: none; }
       .sidebar-btn { padding: 8px 4px; }
       nav.w-14 { width: 44px; min-width: 44px; }
-      #chatPane { width: 100% !important; min-width: 0 !important; }
-      #workspacePane { display: none !important; }
-      .resize-handle { display: none !important; }
-      #sidePanel { width: 220px !important; }
-      .address-bar { display: none; }
-    }
-    @media (min-width: 769px) and (max-width: 1024px) {
-      #chatPane { width: 55% !important; min-width: 280px !important; }
-      nav.w-14 { width: 50px; }
     }
     @media (max-width: 480px) {
       nav.w-14 { width: 40px; min-width: 40px; }
       .sidebar-btn i { font-size: 14px; }
-      #chatInput { font-size: 16px; } /* Prevent iOS zoom */
-      .ws-tab { padding: 6px 10px; font-size: 11px; }
+      #chatInput { font-size: 16px; }
     }
   </style>
 </head>
 <body class="bg-white text-gray-800 h-screen flex overflow-hidden">
 
   <!-- ============================================================ -->
-  <!-- NARROW LEFT SIDEBAR (56px) -->
+  <!-- NARROW LEFT SIDEBAR (56px) — User Navigation -->
   <!-- ============================================================ -->
   <nav class="w-14 bg-gray-50 border-r border-gray-200 flex flex-col items-center py-3 shrink-0">
     <!-- Logo -->
-    <div class="w-9 h-9 bg-indigo-600 rounded-xl flex items-center justify-center mb-4 cursor-pointer" title="Agentic RAG Platform">
+    <div class="w-9 h-9 bg-indigo-600 rounded-xl flex items-center justify-center mb-4 cursor-pointer" title="Agentic RAG Platform" onclick="switchToHomePage()">
       <i class="fas fa-brain text-white text-sm"></i>
     </div>
 
     <!-- Primary nav -->
     <div class="flex-1 w-full px-1 space-y-1 overflow-y-auto">
-      <button class="sidebar-btn active" data-sidebar="chat" onclick="switchSidebar('chat')" title="Conversations">
+      <button class="sidebar-btn active" onclick="switchToHomePage()" title="Home">
+        <i class="fas fa-home"></i>
+        <span>Home</span>
+      </button>
+      <button class="sidebar-btn" onclick="toggleConversationPanel()" title="Conversations">
         <i class="fas fa-comments"></i>
         <span>Chats</span>
       </button>
-      <button class="sidebar-btn" data-sidebar="agents" onclick="switchSidebar('agents')" title="Agents">
-        <i class="fas fa-robot"></i>
+      <a class="sidebar-btn" href="/ai-agents" title="All Agents">
+        <i class="fas fa-star-of-life"></i>
         <span>Agents</span>
-      </button>
-      <button class="sidebar-btn" data-sidebar="explorer" onclick="switchSidebar('explorer')" title="File Explorer">
-        <i class="fas fa-folder"></i>
-        <span>Files</span>
-      </button>
-      <button class="sidebar-btn" data-sidebar="rag" onclick="switchSidebar('rag')" title="Knowledge Base">
-        <i class="fas fa-database"></i>
-        <span>RAG</span>
-      </button>
-      <button class="sidebar-btn" data-sidebar="tools" onclick="switchSidebar('tools')" title="Tools">
-        <i class="fas fa-wrench"></i>
-        <span>Tools</span>
-      </button>
-      <button class="sidebar-btn" data-sidebar="memory" onclick="switchSidebar('memory')" title="Project Memory">
-        <i class="fas fa-brain"></i>
-        <span>Memory</span>
-      </button>
-      <button class="sidebar-btn" data-sidebar="sandbox" onclick="switchSidebar('sandbox')" title="Sandbox Isolation">
-        <i class="fas fa-cube"></i>
-        <span>Sandbox</span>
-      </button>
-      <button class="sidebar-btn" data-sidebar="workflows" onclick="switchSidebar('workflows')" title="Workflows">
-        <i class="fas fa-project-diagram"></i>
-        <span>Flows</span>
-      </button>
+      </a>
     </div>
 
     <!-- Bottom nav -->
     <div class="w-full px-1 space-y-1 border-t border-gray-200 pt-2 mt-2">
-      <button class="sidebar-btn" onclick="showSettings()" title="Settings">
-        <i class="fas fa-cog"></i>
-        <span>Settings</span>
-      </button>
+      <a class="sidebar-btn" href="/admin" title="Admin Console">
+        <i class="fas fa-tools"></i>
+        <span>Admin</span>
+      </a>
       <div class="flex items-center justify-center pt-1">
         <div class="w-7 h-7 rounded-full bg-indigo-100 flex items-center justify-center text-xs text-indigo-600 font-bold cursor-pointer" title="User">U</div>
       </div>
@@ -207,29 +146,140 @@
   </nav>
 
   <!-- ============================================================ -->
-  <!-- EXPANDABLE SIDE PANEL (slides out from sidebar) -->
+  <!-- CONVERSATION LIST PANEL (slides out) -->
   <!-- ============================================================ -->
-  <div id="sidePanel" class="panel-hidden bg-gray-50 border-r border-gray-200 flex-col overflow-hidden absolute left-14 top-0 bottom-0 z-30 shadow-lg" style="width:256px;">
+  <div id="convPanel" class="bg-gray-50 border-r border-gray-200 flex-col overflow-hidden absolute left-14 top-0 bottom-0 z-30 shadow-lg" style="width:256px; display:none;">
     <div class="flex items-center justify-between px-3 py-3 border-b border-gray-200">
-      <span id="sidePanelTitle" class="text-sm font-semibold text-gray-800"></span>
-      <button onclick="closeSidePanel()" class="text-gray-400 hover:text-gray-700 text-xs p-1"><i class="fas fa-times"></i></button>
+      <span class="text-sm font-semibold text-gray-800">Conversations</span>
+      <button onclick="closeConvPanel()" class="text-gray-400 hover:text-gray-700 text-xs p-1"><i class="fas fa-times"></i></button>
     </div>
-    <div id="sidePanelContent" class="flex-1 overflow-y-auto p-3"></div>
+    <div class="p-3">
+      <button onclick="startNewConversation()" class="w-full px-3 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg text-xs font-medium transition mb-3">
+        <i class="fas fa-plus mr-1"></i>New Chat
+      </button>
+      <div id="convListSide" class="space-y-1">
+        <div class="text-xs text-gray-400 py-4 text-center">Loading conversations...</div>
+      </div>
+    </div>
   </div>
 
   <!-- ============================================================ -->
-  <!-- MAIN CONTENT: Chat (left) | Workspace (right) -->
+  <!-- MAIN CONTENT -->
   <!-- ============================================================ -->
-  <div class="flex-1 flex overflow-hidden min-w-0">
+  <div class="flex-1 flex flex-col overflow-hidden min-w-0">
 
-    <!-- ======================================================== -->
-    <!-- CHAT PANE -->
-    <!-- ======================================================== -->
-    <div id="chatPane" class="flex flex-col border-r border-gray-200" style="width:100%; min-width:0;">
+    <!-- ====================================================== -->
+    <!-- HOME PAGE — Genspark-style centered layout              -->
+    <!-- ====================================================== -->
+    <div id="homePage" class="flex-1 flex flex-col items-center justify-center bg-white px-6">
 
-      <!-- Chat header (slim, only shows during active chat) -->
-      <div id="chatHeader" class="bg-white border-b border-gray-200 px-4 py-2.5 flex items-center justify-between shrink-0" style="display:none;">
+      <!-- Title -->
+      <h1 class="text-2xl font-bold text-gray-900 mb-8 text-center">Agentic RAG Platform</h1>
+
+      <!-- Input Box -->
+      <div class="w-full max-w-xl mb-3">
+        <div class="home-input-box">
+          <textarea id="chatInput"
+            placeholder="Ask anything, create anything"
+            rows="1"
+            onkeydown="handleInputKeydown(event)"
+            oninput="autoResize(this)"
+          ></textarea>
+          <div class="home-input-toolbar">
+            <div class="toolbar-left">
+              <button class="toolbar-icon-btn" title="Attach file"><i class="fas fa-plus"></i></button>
+              <button class="toolbar-icon-btn" title="GitHub"><i class="fab fa-github" style="color:#24292e"></i></button>
+              <button class="toolbar-icon-btn" title="Attach"><i class="fas fa-paperclip"></i></button>
+              <button class="toolbar-model-pill" title="Model selector">
+                <i class="fas fa-bolt" style="color:#6366f1; font-size:11px;"></i>
+                <span>GPT-4o</span>
+              </button>
+            </div>
+            <div class="toolbar-right">
+              <button class="toolbar-icon-btn" title="Voice input"><i class="fas fa-microphone"></i></button>
+              <button onclick="sendMessage()" id="sendBtn" class="send-btn-dark">
+                <i class="fas fa-plus" style="font-size:10px;"></i>
+                <span>Send</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Suggestion pills -->
+      <div class="flex items-center gap-2 mb-10 flex-wrap justify-center max-w-xl">
+        <button class="suggestion-pill" onclick="sendQuickAction('Show me the system status and available tools')">
+          Show system status
+        </button>
+        <button class="suggestion-pill" onclick="sendQuickAction('Create a new web app with a REST API')">
+          Create a web app
+        </button>
+        <button class="suggestion-pill" onclick="sendQuickAction('Search my knowledge base for recent documents')">
+          Search knowledge base
+        </button>
+      </div>
+
+      <!-- Service icons row — each opens its own AI agent page -->
+      <div class="flex items-start gap-5 flex-wrap justify-center max-w-2xl">
+        <div class="service-icon-item" onclick="navigateToAgent('ai-slides')">
+          <div class="service-icon-circle" style="background:#ecfdf5;"><i class="fas fa-file-powerpoint" style="color:#10b981;"></i></div>
+          <span class="service-icon-label">AI Slides</span>
+        </div>
+        <div class="service-icon-item" onclick="navigateToAgent('ai-sheets')">
+          <div class="service-icon-circle" style="background:#f0fdf4;"><i class="fas fa-table" style="color:#22c55e;"></i></div>
+          <span class="service-icon-label">AI Sheets</span>
+        </div>
+        <div class="service-icon-item" onclick="navigateToAgent('ai-docs')">
+          <div class="service-icon-circle" style="background:#eff6ff;"><i class="fas fa-file-alt" style="color:#3b82f6;"></i></div>
+          <span class="service-icon-label">AI Docs</span>
+        </div>
+        <div class="service-icon-item" onclick="navigateToAgent('ai-designer')">
+          <div class="service-icon-circle" style="background:#fdf4ff;"><i class="fas fa-pen-ruler" style="color:#a855f7;"></i></div>
+          <span class="service-icon-label">AI Designer</span>
+        </div>
+        <div class="service-icon-item" onclick="switchToChatMode(); sendQuickAction('Start a new chat conversation')" style="position:relative;">
+          <div class="service-icon-circle" style="background:#eef2ff;"><i class="fas fa-comment-dots" style="color:#6366f1;"></i></div>
+          <div style="position:absolute;top:0;right:14px;width:8px;height:8px;background:#3b82f6;border-radius:50%;border:2px solid #fff;"></div>
+          <span class="service-icon-label">AI Chat</span>
+        </div>
+        <div class="service-icon-item" onclick="navigateToAgent('ai-image')">
+          <div class="service-icon-circle" style="background:#fff7ed;"><i class="fas fa-image" style="color:#f97316;"></i></div>
+          <span class="service-icon-label">AI Image</span>
+        </div>
+        <div class="service-icon-item" onclick="navigateToAgent('ai-music')">
+          <div class="service-icon-circle" style="background:#fef2f2;"><i class="fas fa-music" style="color:#ef4444;"></i></div>
+          <span class="service-icon-label">AI Music</span>
+        </div>
+        <div class="service-icon-item" onclick="navigateToAgent('ai-video')">
+          <div class="service-icon-circle" style="background:#ecfdf5;"><i class="fas fa-video" style="color:#14b8a6;"></i></div>
+          <span class="service-icon-label">AI Video</span>
+        </div>
+        <div class="service-icon-item" onclick="navigateToAgent('ai-meeting-notes')">
+          <div class="service-icon-circle" style="background:#ecfdf5;"><i class="fas fa-clipboard-list" style="color:#0ea5e9;"></i></div>
+          <span class="service-icon-label">AI Meeting<br>Notes</span>
+        </div>
+        <div class="service-icon-item" onclick="navigateToAgent('ai-agents')">
+          <div class="service-icon-circle" style="background:#f5f5f5;"><i class="fas fa-star-of-life" style="color:#9ca3af;"></i></div>
+          <span class="service-icon-label">All Agents</span>
+        </div>
+      </div>
+
+      <!-- Token counter (subtle at bottom) -->
+      <div class="mt-6 text-[11px] text-gray-400">
+        <span id="tokenCounter">Tokens: 0 | Cost: $0.00</span>
+      </div>
+    </div>
+
+    <!-- ====================================================== -->
+    <!-- CHAT VIEW (hidden on home, shown during conversation)  -->
+    <!-- ====================================================== -->
+    <div id="chatView" class="flex-1 flex flex-col bg-white" style="display:none;">
+      <!-- Chat header -->
+      <div class="bg-white border-b border-gray-200 px-4 py-2.5 flex items-center justify-between shrink-0">
         <div class="flex items-center gap-2">
+          <button onclick="switchToHomePage()" class="text-gray-400 hover:text-gray-700 mr-1" title="Back to Home">
+            <i class="fas fa-arrow-left text-sm"></i>
+          </button>
           <h2 class="text-sm font-semibold text-gray-800">Chat</h2>
           <span class="text-[10px] px-2 py-0.5 rounded-full bg-indigo-50 text-indigo-600 font-semibold">v1.9</span>
         </div>
@@ -241,114 +291,11 @@
         </div>
       </div>
 
-      <!-- Chat messages (hidden on home, shown during conversation) -->
-      <div id="chatMessages" class="flex-1 overflow-y-auto px-4 py-4 space-y-4 bg-white" style="display:none;">
-      </div>
+      <!-- Chat messages -->
+      <div id="chatMessages" class="flex-1 overflow-y-auto px-4 py-4 space-y-4 bg-white"></div>
 
-      <!-- ====================================================== -->
-      <!-- HOME PAGE — Genspark-style centered layout              -->
-      <!-- ====================================================== -->
-      <div id="homePage" class="flex-1 flex flex-col items-center justify-center bg-white px-6">
-
-        <!-- Title -->
-        <h1 class="text-2xl font-bold text-gray-900 mb-8 text-center">Agentic RAG Platform</h1>
-
-        <!-- Input Box -->
-        <div class="w-full max-w-xl mb-3">
-          <div class="home-input-box">
-            <textarea id="chatInput"
-              placeholder="Ask anything, create anything"
-              rows="1"
-              onkeydown="handleInputKeydown(event)"
-              oninput="autoResize(this)"
-            ></textarea>
-            <div class="home-input-toolbar">
-              <div class="toolbar-left">
-                <button class="toolbar-icon-btn" title="Attach file"><i class="fas fa-plus"></i></button>
-                <button class="toolbar-icon-btn" title="GitHub"><i class="fab fa-github" style="color:#24292e"></i></button>
-                <button class="toolbar-icon-btn" title="Attach"><i class="fas fa-paperclip"></i></button>
-                <button class="toolbar-model-pill" title="Model selector">
-                  <i class="fas fa-bolt" style="color:#6366f1; font-size:11px;"></i>
-                  <span>GPT-4o</span>
-                </button>
-              </div>
-              <div class="toolbar-right">
-                <button class="toolbar-icon-btn" title="Voice input"><i class="fas fa-microphone"></i></button>
-                <button onclick="sendMessage()" id="sendBtn" class="send-btn-dark">
-                  <i class="fas fa-plus" style="font-size:10px;"></i>
-                  <span>Send</span>
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <!-- Suggestion pills -->
-        <div class="flex items-center gap-2 mb-10 flex-wrap justify-center max-w-xl">
-          <button class="suggestion-pill" onclick="sendQuickAction('Show me the system status and available tools')">
-            Show system status
-          </button>
-          <button class="suggestion-pill" onclick="sendQuickAction('Create a new web app with a REST API')">
-            Create a web app
-          </button>
-          <button class="suggestion-pill" onclick="sendQuickAction('Search my knowledge base for recent documents')">
-            Search knowledge base
-          </button>
-        </div>
-
-        <!-- Service icons row — each opens its own AI agent page -->
-        <div class="flex items-start gap-5 flex-wrap justify-center max-w-2xl">
-          <div class="service-icon-item" onclick="navigateToAgent('ai-slides')">
-            <div class="service-icon-circle" style="background:#ecfdf5;"><i class="fas fa-file-powerpoint" style="color:#10b981;"></i></div>
-            <span class="service-icon-label">AI Slides</span>
-          </div>
-          <div class="service-icon-item" onclick="navigateToAgent('ai-sheets')">
-            <div class="service-icon-circle" style="background:#f0fdf4;"><i class="fas fa-table" style="color:#22c55e;"></i></div>
-            <span class="service-icon-label">AI Sheets</span>
-          </div>
-          <div class="service-icon-item" onclick="navigateToAgent('ai-docs')">
-            <div class="service-icon-circle" style="background:#eff6ff;"><i class="fas fa-file-alt" style="color:#3b82f6;"></i></div>
-            <span class="service-icon-label">AI Docs</span>
-          </div>
-          <div class="service-icon-item" onclick="navigateToAgent('ai-designer')">
-            <div class="service-icon-circle" style="background:#fdf4ff;"><i class="fas fa-pen-ruler" style="color:#a855f7;"></i></div>
-            <span class="service-icon-label">AI Designer</span>
-          </div>
-          <div class="service-icon-item" onclick="switchToChatMode(); sendQuickAction('Start a new chat conversation')" style="position:relative;">
-            <div class="service-icon-circle" style="background:#eef2ff;"><i class="fas fa-comment-dots" style="color:#6366f1;"></i></div>
-            <div style="position:absolute;top:0;right:14px;width:8px;height:8px;background:#3b82f6;border-radius:50%;border:2px solid #fff;"></div>
-            <span class="service-icon-label">AI Chat</span>
-          </div>
-          <div class="service-icon-item" onclick="navigateToAgent('ai-image')">
-            <div class="service-icon-circle" style="background:#fff7ed;"><i class="fas fa-image" style="color:#f97316;"></i></div>
-            <span class="service-icon-label">AI Image</span>
-          </div>
-          <div class="service-icon-item" onclick="navigateToAgent('ai-music')">
-            <div class="service-icon-circle" style="background:#fef2f2;"><i class="fas fa-music" style="color:#ef4444;"></i></div>
-            <span class="service-icon-label">AI Music</span>
-          </div>
-          <div class="service-icon-item" onclick="navigateToAgent('ai-video')">
-            <div class="service-icon-circle" style="background:#ecfdf5;"><i class="fas fa-video" style="color:#14b8a6;"></i></div>
-            <span class="service-icon-label">AI Video</span>
-          </div>
-          <div class="service-icon-item" onclick="navigateToAgent('ai-meeting-notes')">
-            <div class="service-icon-circle" style="background:#ecfdf5;"><i class="fas fa-clipboard-list" style="color:#0ea5e9;"></i></div>
-            <span class="service-icon-label">AI Meeting<br>Notes</span>
-          </div>
-          <div class="service-icon-item" onclick="navigateToAgent('ai-agents')">
-            <div class="service-icon-circle" style="background:#f5f5f5;"><i class="fas fa-star-of-life" style="color:#9ca3af;"></i></div>
-            <span class="service-icon-label">All Agents</span>
-          </div>
-        </div>
-
-        <!-- Token counter (subtle at bottom) -->
-        <div class="mt-6 text-[11px] text-gray-400">
-          <span id="tokenCounter">Tokens: 0 | Cost: $0.00</span>
-        </div>
-      </div>
-
-      <!-- Chat input area (hidden on home, shown during active conversation) -->
-      <div id="chatInputArea" class="border-t border-gray-200 bg-white p-3" style="display:none;">
+      <!-- Chat input area -->
+      <div class="border-t border-gray-200 bg-white p-3">
         <div class="max-w-2xl mx-auto">
           <div class="relative">
             <textarea id="chatInputActive"
@@ -380,340 +327,8 @@
       </div>
     </div>
 
-    <!-- Resize handle (hidden on home) -->
-    <div class="resize-handle" id="mainResize" style="display:none;"></div>
-
-    <!-- ======================================================== -->
-    <!-- WORKSPACE PANEL (hidden on home, shown in chat mode)     -->
-    <!-- ======================================================== -->
-    <div id="workspacePane" class="flex-1 flex flex-col min-w-0 bg-white" style="display:none;">
-
-      <!-- Tab bar -->
-      <div class="bg-white border-b border-gray-200 shrink-0">
-        <div class="flex items-center px-2 overflow-x-auto">
-          <div class="flex items-center gap-1 px-2 py-1.5 shrink-0">
-            <i class="fas fa-code text-indigo-500 text-sm mr-1.5"></i>
-            <span class="text-sm font-semibold text-gray-800 mr-3">AI Developer</span>
-          </div>
-          <button class="ws-tab active" data-wstab="preview" onclick="switchWorkspaceTab('preview')">
-            <i class="fas fa-eye"></i>Preview
-          </button>
-          <button class="ws-tab" data-wstab="explorer" onclick="switchWorkspaceTab('explorer')">
-            <i class="fas fa-folder-tree"></i>Files
-          </button>
-          <button class="ws-tab" data-wstab="trace" onclick="switchWorkspaceTab('trace')">
-            <i class="fas fa-route"></i>Trace
-          </button>
-          <button class="ws-tab" data-wstab="terminal" onclick="switchWorkspaceTab('terminal')">
-            <i class="fas fa-terminal"></i>Terminal
-          </button>
-          <button class="ws-tab" data-wstab="deploy" onclick="switchWorkspaceTab('deploy')">
-            <i class="fas fa-cloud-upload-alt"></i>Deploy
-          </button>
-          <button class="ws-tab" data-wstab="github" onclick="switchWorkspaceTab('github')">
-            <i class="fab fa-github"></i>GitHub
-          </button>
-          <button class="ws-tab" data-wstab="metrics" onclick="switchWorkspaceTab('metrics')">
-            <i class="fas fa-chart-bar"></i>Metrics
-          </button>
-        </div>
-      </div>
-
-      <!-- Address bar -->
-      <div class="px-3 py-2 border-b border-gray-100 bg-white shrink-0">
-        <div class="address-bar">
-          <i class="fas fa-globe text-gray-400 text-xs"></i>
-          <input id="previewUrl" type="text" placeholder="Enter URL address..." readonly>
-          <button onclick="copyPreviewUrl()" title="Copy URL"><i class="fas fa-copy text-xs"></i></button>
-          <button onclick="refreshPreview()" title="Refresh"><i class="fas fa-sync-alt text-xs"></i></button>
-        </div>
-      </div>
-
-      <!-- Tab panels container -->
-      <div class="flex-1 overflow-hidden relative">
-
-        <!-- Preview -->
-        <div id="wspanel-preview" class="absolute inset-0 flex flex-col items-center justify-center bg-gray-50">
-          <div class="text-center" id="previewPlaceholder">
-            <i class="fas fa-desktop text-5xl text-gray-300 mb-4"></i>
-            <p class="text-gray-500 text-sm font-medium">Computer is set up successfully.</p>
-            <p class="text-gray-400 text-xs mt-1">Your AI developer is ready.</p>
-          </div>
-          <iframe id="previewFrame" class="w-full h-full" style="display:none;" sandbox="allow-scripts allow-same-origin"></iframe>
-        </div>
-
-        <!-- File Explorer -->
-        <div id="wspanel-explorer" class="absolute inset-0 overflow-y-auto bg-white" style="display:none;">
-          <div class="p-3 border-b border-gray-100 flex items-center justify-between">
-            <div class="flex items-center gap-2">
-              <span class="text-xs font-semibold text-gray-500 uppercase tracking-wider">Workspace</span>
-              <select id="workspaceSelect" onchange="loadWorkspace(this.value)"
-                class="bg-gray-50 border border-gray-200 rounded-lg px-2 py-1 text-xs text-gray-700 focus:outline-none focus:ring-1 focus:ring-indigo-300">
-                <option value="default">default</option>
-              </select>
-            </div>
-            <div class="flex items-center gap-1">
-              <button onclick="createWorkspace()" class="text-xs text-indigo-500 hover:text-indigo-600 px-2 py-1 rounded hover:bg-indigo-50 transition" title="New workspace">
-                <i class="fas fa-plus"></i>
-              </button>
-              <button onclick="refreshFileTree()" class="text-xs text-gray-400 hover:text-gray-600 px-2 py-1 rounded hover:bg-gray-50 transition" title="Refresh">
-                <i class="fas fa-sync-alt"></i>
-              </button>
-            </div>
-          </div>
-          <div id="fileTree" class="p-2 text-sm">
-            <div class="text-gray-400 text-xs px-2 py-4">Loading files...</div>
-          </div>
-        </div>
-
-        <!-- Agent Trace -->
-        <div id="wspanel-trace" class="absolute inset-0 overflow-y-auto p-3 bg-white" style="display:none;">
-          <div id="traceContent" class="space-y-2">
-            <div class="text-xs text-gray-400 text-center py-12">
-              <i class="fas fa-route text-3xl mb-3 block text-gray-300"></i>
-              <p class="font-medium text-gray-500">Agent trace will appear here</p>
-              <p class="text-gray-400 mt-1">Start a chat to see AI reasoning, tool calls, and results</p>
-            </div>
-          </div>
-        </div>
-
-        <!-- Terminal -->
-        <div id="wspanel-terminal" class="absolute inset-0 flex flex-col bg-gray-900" style="display:none;">
-          <div class="flex items-center justify-between px-3 py-1.5 bg-gray-800 border-b border-gray-700">
-            <div class="flex items-center gap-2">
-              <div class="flex gap-1">
-                <div class="w-2.5 h-2.5 rounded-full bg-red-500"></div>
-                <div class="w-2.5 h-2.5 rounded-full bg-yellow-500"></div>
-                <div class="w-2.5 h-2.5 rounded-full bg-green-500"></div>
-              </div>
-              <span class="text-[10px] text-gray-400 font-mono">Terminal — workspace/<span id="terminalWorkspace">default</span></span>
-            </div>
-            <button onclick="clearTerminal()" class="text-[10px] text-gray-500 hover:text-gray-300 px-1" title="Clear"><i class="fas fa-eraser"></i></button>
-          </div>
-          <div id="terminalOutput" class="flex-1 overflow-y-auto p-3 font-mono text-xs text-green-400" style="min-height:0">
-            <div class="text-gray-500">Agentic RAG Terminal v1.9 — Direct command execution</div>
-            <div class="text-gray-500">Type any shell command and press Enter.</div>
-            <div class="text-gray-500 mb-2">─────────────────────────────────────────</div>
-          </div>
-          <div class="border-t border-gray-700 p-2 flex gap-2 bg-gray-800 shrink-0">
-            <span class="text-green-400 font-mono text-xs py-1" id="termPrompt">$</span>
-            <input id="terminalInput" type="text" placeholder="Enter command..."
-              onkeydown="if(event.key==='Enter')executeTerminalCmd()"
-              class="flex-1 bg-transparent border-none text-xs font-mono text-green-400 focus:outline-none placeholder-gray-600"
-              autocomplete="off" spellcheck="false">
-          </div>
-        </div>
-
-        <!-- Deploy -->
-        <div id="wspanel-deploy" class="absolute inset-0 overflow-y-auto p-4 bg-white" style="display:none;">
-          <div id="deployContent">
-            <div class="flex items-center justify-between mb-4">
-              <div class="flex items-center gap-2">
-                <i class="fas fa-cloud-upload-alt text-indigo-500"></i>
-                <span class="text-sm font-semibold text-gray-800">Deployment Center</span>
-              </div>
-              <button onclick="loadDeployStatus()" class="text-xs text-gray-400 hover:text-gray-600 px-2 py-1 rounded hover:bg-gray-50">
-                <i class="fas fa-sync-alt"></i>
-              </button>
-            </div>
-            <!-- Deploy Actions -->
-            <div class="grid grid-cols-2 gap-3 mb-4">
-              <button onclick="sendQuickAction('Build and deploy my workspace to Cloudflare Pages')" class="p-3 bg-orange-50 hover:bg-orange-100 rounded-lg text-left transition border border-orange-100">
-                <i class="fas fa-cloud text-orange-500 text-sm"></i>
-                <div class="text-xs font-medium text-gray-700 mt-1">Cloudflare Pages</div>
-                <div class="text-[10px] text-gray-400">Edge deployment</div>
-              </button>
-              <button onclick="sendQuickAction('Build and deploy my workspace to Vercel')" class="p-3 bg-gray-50 hover:bg-gray-100 rounded-lg text-left transition border border-gray-100">
-                <i class="fas fa-triangle-exclamation text-gray-800 text-sm"></i>
-                <div class="text-xs font-medium text-gray-700 mt-1">Vercel</div>
-                <div class="text-[10px] text-gray-400">Serverless deployment</div>
-              </button>
-            </div>
-            <!-- Quick actions -->
-            <div class="flex gap-2 mb-4">
-              <button onclick="sendQuickAction('Run npm run build in my workspace')" class="flex-1 px-3 py-2 bg-blue-50 hover:bg-blue-100 text-blue-700 rounded-lg text-xs font-medium transition">
-                <i class="fas fa-hammer mr-1"></i>Build
-              </button>
-              <button onclick="sendQuickAction('Run npm test in my workspace')" class="flex-1 px-3 py-2 bg-green-50 hover:bg-green-100 text-green-700 rounded-lg text-xs font-medium transition">
-                <i class="fas fa-vial mr-1"></i>Test
-              </button>
-              <button onclick="sendQuickAction('Show deployment preview URL')" class="flex-1 px-3 py-2 bg-purple-50 hover:bg-purple-100 text-purple-700 rounded-lg text-xs font-medium transition">
-                <i class="fas fa-eye mr-1"></i>Preview
-              </button>
-            </div>
-            <!-- Deployment History -->
-            <div class="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2">Recent Deployments</div>
-            <div id="deployHistory" class="space-y-2">
-              <div class="text-xs text-gray-400 text-center py-4">
-                <i class="fas fa-rocket text-gray-300 text-2xl mb-2 block"></i>
-                No deployments yet. Deploy your workspace to see history.
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <!-- GitHub -->
-        <div id="wspanel-github" class="absolute inset-0 overflow-y-auto p-4 bg-white" style="display:none;">
-          <div id="githubContent">
-            <div class="flex items-center justify-between mb-4">
-              <div class="flex items-center gap-2">
-                <i class="fab fa-github text-gray-800"></i>
-                <span class="text-sm font-semibold text-gray-800">Git & GitHub</span>
-              </div>
-              <button onclick="loadGitStatus()" class="text-xs text-gray-400 hover:text-gray-600 px-2 py-1 rounded hover:bg-gray-50">
-                <i class="fas fa-sync-alt"></i>
-              </button>
-            </div>
-            <!-- Git Status Card -->
-            <div id="gitStatusCard" class="mb-4 p-3 bg-gray-50 rounded-lg border border-gray-100">
-              <div class="flex items-center gap-2 mb-2">
-                <div id="gitStatusDot" class="w-2 h-2 rounded-full bg-gray-300"></div>
-                <span id="gitBranchName" class="text-xs font-mono text-gray-600">loading...</span>
-                <span id="gitCleanBadge" class="text-[10px] px-1.5 py-0.5 rounded-full bg-gray-100 text-gray-500 ml-auto">...</span>
-              </div>
-              <div id="gitRemoteUrl" class="text-[10px] text-gray-400 truncate"></div>
-              <div id="gitChangedFiles" class="mt-2 text-xs text-gray-500"></div>
-            </div>
-            <!-- Git Actions -->
-            <div class="grid grid-cols-3 gap-2 mb-4">
-              <button onclick="sendQuickAction('Run git status on my workspace')" class="px-2 py-2 bg-gray-50 hover:bg-gray-100 rounded-lg text-xs text-gray-600 transition border border-gray-100 text-center">
-                <i class="fas fa-info-circle text-blue-500 block text-sm mb-1"></i>Status
-              </button>
-              <button onclick="sendQuickAction('Commit all changes in my workspace with a descriptive message')" class="px-2 py-2 bg-gray-50 hover:bg-gray-100 rounded-lg text-xs text-gray-600 transition border border-gray-100 text-center">
-                <i class="fas fa-check-circle text-green-500 block text-sm mb-1"></i>Commit
-              </button>
-              <button onclick="sendQuickAction('Push the current workspace to GitHub')" class="px-2 py-2 bg-gray-50 hover:bg-gray-100 rounded-lg text-xs text-gray-600 transition border border-gray-100 text-center">
-                <i class="fas fa-upload text-purple-500 block text-sm mb-1"></i>Push
-              </button>
-            </div>
-            <div class="grid grid-cols-2 gap-2 mb-4">
-              <button onclick="sendQuickAction('Create a new GitHub pull request for the current branch')" class="px-2 py-2 bg-gray-50 hover:bg-gray-100 rounded-lg text-xs text-gray-600 transition border border-gray-100 text-center">
-                <i class="fas fa-code-branch text-orange-500 mr-1"></i>Create PR
-              </button>
-              <button onclick="sendQuickAction('List my GitHub repositories')" class="px-2 py-2 bg-gray-50 hover:bg-gray-100 rounded-lg text-xs text-gray-600 transition border border-gray-100 text-center">
-                <i class="fas fa-list text-blue-500 mr-1"></i>List Repos
-              </button>
-            </div>
-            <!-- Commit History -->
-            <div class="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2">Recent Commits</div>
-            <div id="gitCommitHistory" class="space-y-1">
-              <div class="text-xs text-gray-400 text-center py-4">Loading commits...</div>
-            </div>
-          </div>
-        </div>
-
-        <!-- Metrics -->
-        <div id="wspanel-metrics" class="absolute inset-0 overflow-y-auto p-4 bg-white" style="display:none;">
-          <div class="flex items-center justify-between mb-4">
-            <div class="flex items-center gap-2">
-              <i class="fas fa-chart-bar text-indigo-500"></i>
-              <span class="text-sm font-semibold text-gray-800">Performance Metrics</span>
-            </div>
-            <div class="flex items-center gap-2">
-              <span id="metricsRefreshTime" class="text-[10px] text-gray-400"></span>
-              <button onclick="loadMetrics()" class="text-xs text-gray-400 hover:text-gray-600 px-2 py-1 rounded hover:bg-gray-50">
-                <i class="fas fa-sync-alt"></i>
-              </button>
-            </div>
-          </div>
-          <div class="grid grid-cols-4 gap-3 mb-4" id="metricsTopCards"></div>
-          <div class="grid grid-cols-2 gap-4 mb-4">
-            <div class="bg-gray-50 rounded-xl p-3 border border-gray-200">
-              <div class="text-xs text-gray-500 font-semibold mb-2">Latency Distribution (ms)</div>
-              <canvas id="latencyChart" height="140"></canvas>
-            </div>
-            <div class="bg-gray-50 rounded-xl p-3 border border-gray-200">
-              <div class="text-xs text-gray-500 font-semibold mb-2">Cost by Model</div>
-              <canvas id="costChart" height="140"></canvas>
-            </div>
-          </div>
-          <div class="grid grid-cols-2 gap-3 mb-4" id="metricsGrid"></div>
-          <!-- Tool Stats -->
-          <div class="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2">Tool Execution Stats</div>
-          <div id="toolStatsGrid" class="grid grid-cols-2 gap-2 mb-4"></div>
-          <!-- Provider Health -->
-          <div class="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2">Provider Health</div>
-          <div id="providerHealthGrid" class="grid grid-cols-2 gap-2"></div>
-        </div>
-
-      </div>
-    </div>
-
   </div>
 
-  <!-- ============================================================ -->
-  <!-- SETTINGS MODAL -->
-  <!-- ============================================================ -->
-  <div id="settingsModal" style="display:none;" class="fixed inset-0 bg-black/40 z-50 flex items-center justify-center">
-    <div class="bg-white rounded-2xl border border-gray-200 shadow-xl w-full max-w-lg max-h-[80vh] overflow-y-auto p-6">
-      <div class="flex items-center justify-between mb-6">
-        <h3 class="text-lg font-bold text-gray-800">Settings</h3>
-        <button onclick="hideSettings()" class="text-gray-400 hover:text-gray-700"><i class="fas fa-times"></i></button>
-      </div>
-      <div class="space-y-4">
-        <div>
-          <label class="text-xs font-semibold text-gray-500 uppercase">LLM Provider</label>
-          <select id="settingsProvider" class="w-full mt-1 bg-gray-50 border border-gray-200 rounded-lg px-3 py-2 text-sm text-gray-700">
-            <option value="openai">OpenAI (GPT-4o)</option>
-            <option value="anthropic">Anthropic (Claude)</option>
-            <option value="google">Google (Gemini)</option>
-            <option value="groq">Groq (Llama)</option>
-            <option value="ollama">Ollama (Local)</option>
-          </select>
-        </div>
-        <div>
-          <label class="text-xs font-semibold text-gray-500 uppercase">Approval Mode</label>
-          <select id="settingsApproval" class="w-full mt-1 bg-gray-50 border border-gray-200 rounded-lg px-3 py-2 text-sm text-gray-700">
-            <option value="dangerous">Require approval for dangerous operations</option>
-            <option value="all">Require approval for all tool calls</option>
-            <option value="none">Auto-approve everything (use with caution)</option>
-          </select>
-        </div>
-        <div>
-          <label class="text-xs font-semibold text-gray-500 uppercase">Max Budget Per Request ($)</label>
-          <input type="number" id="settingsBudget" value="1.00" step="0.1" min="0.1"
-            class="w-full mt-1 bg-gray-50 border border-gray-200 rounded-lg px-3 py-2 text-sm text-gray-700">
-        </div>
-      </div>
-      <div class="mt-6 pt-4 border-t border-gray-200">
-        <h4 class="text-sm font-semibold text-gray-800 mb-3">System Information</h4>
-        <div id="systemInfo" class="text-xs text-gray-500 space-y-1">Loading...</div>
-      </div>
-    </div>
-  </div>
-
-  <!-- ============================================================ -->
-  <!-- RAG MODAL -->
-  <!-- ============================================================ -->
-  <div id="ragModal" style="display:none;" class="fixed inset-0 bg-black/40 z-50 flex items-center justify-center">
-    <div class="bg-white rounded-2xl border border-gray-200 shadow-xl w-full max-w-2xl max-h-[80vh] overflow-y-auto p-6">
-      <div class="flex items-center justify-between mb-4">
-        <h3 class="text-lg font-bold text-gray-800"><i class="fas fa-database mr-2 text-indigo-500"></i>Knowledge Base</h3>
-        <button onclick="hideRAGPanel()" class="text-gray-400 hover:text-gray-700"><i class="fas fa-times"></i></button>
-      </div>
-      <div class="mb-4 p-4 bg-gray-50 rounded-lg border border-gray-200">
-        <h4 class="text-sm font-semibold text-gray-700 mb-2">Add Document</h4>
-        <input id="ragTitle" placeholder="Document title" class="w-full bg-white border border-gray-200 rounded-lg px-3 py-2 text-sm mb-2">
-        <textarea id="ragContent" placeholder="Paste document content here..." rows="4"
-          class="w-full bg-white border border-gray-200 rounded-lg px-3 py-2 text-sm mb-2 resize-none"></textarea>
-        <div class="flex gap-2">
-          <select id="ragType" class="bg-white border border-gray-200 rounded-lg px-3 py-2 text-sm text-gray-700">
-            <option value="text">Text</option>
-            <option value="markdown">Markdown</option>
-            <option value="code">Code</option>
-            <option value="html">HTML</option>
-          </select>
-          <button onclick="ingestDocument()" class="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg text-sm font-medium transition">
-            <i class="fas fa-upload mr-1"></i>Ingest
-          </button>
-        </div>
-      </div>
-      <div id="ragDocList" class="space-y-2">
-        <div class="text-sm text-gray-400 text-center py-4">No documents ingested yet</div>
-      </div>
-    </div>
-  </div>
-
-  <script src="/static/js/app.js"></script>
+  <script src="/static/js/home.js"></script>
 </body>
 </html>
