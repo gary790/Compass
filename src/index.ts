@@ -132,7 +132,7 @@ const agentPages: Record<string, string> = {
   '/ai-music': 'public/ai-music.html',
   '/ai-video': 'public/ai-video.html',
   '/ai-meeting-notes': 'public/ai-meeting-notes.html',
-  '/ai-agents': 'public/ai-slides.html',   // Placeholder
+  '/ai-agents': 'public/ai-agents.html',
 };
 
 for (const [route, file] of Object.entries(agentPages)) {
