@@ -129,7 +129,7 @@ const agentPages: Record<string, string> = {
   '/ai-docs': 'public/ai-docs.html',
   '/ai-designer': 'public/ai-designer.html',
   '/ai-image': 'public/ai-image.html',
-  '/ai-music': 'public/ai-slides.html',    // Placeholder
+  '/ai-music': 'public/ai-music.html',
   '/ai-video': 'public/ai-slides.html',    // Placeholder
   '/ai-meeting-notes': 'public/ai-slides.html', // Placeholder
   '/ai-agents': 'public/ai-slides.html',   // Placeholder
