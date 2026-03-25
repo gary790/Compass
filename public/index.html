@@ -63,67 +63,6 @@
     .panel-flex { display: flex !important; }
     .panel-block { display: block !important; }
 
-    /* ===== HOME PAGE — Genspark-style centered layout ===== */
-    .home-input-box {
-      border: 1px solid #e5e7eb; border-radius: 16px; background: #fff;
-      padding: 0; overflow: hidden; transition: border-color 0.2s, box-shadow 0.2s;
-    }
-    .home-input-box:focus-within { border-color: #c7d2fe; box-shadow: 0 0 0 3px rgba(99,102,241,0.08); }
-    .home-input-box textarea {
-      width: 100%; border: none; outline: none; resize: none;
-      padding: 16px 18px 8px; font-size: 15px; color: #1f2937;
-      background: transparent; min-height: 44px; max-height: 120px;
-    }
-    .home-input-box textarea::placeholder { color: #9ca3af; }
-    .home-input-toolbar {
-      display: flex; align-items: center; justify-content: space-between;
-      padding: 6px 12px 10px; gap: 6px;
-    }
-    .home-input-toolbar .toolbar-left { display: flex; align-items: center; gap: 4px; }
-    .home-input-toolbar .toolbar-right { display: flex; align-items: center; gap: 6px; }
-    .toolbar-icon-btn {
-      width: 30px; height: 30px; display: flex; align-items: center; justify-content: center;
-      border-radius: 8px; border: none; background: transparent; color: #9ca3af;
-      cursor: pointer; transition: all 0.15s; font-size: 14px;
-    }
-    .toolbar-icon-btn:hover { background: #f3f4f6; color: #4b5563; }
-    .toolbar-model-pill {
-      display: inline-flex; align-items: center; gap: 5px;
-      padding: 4px 10px; border-radius: 8px; border: none;
-      background: transparent; color: #9ca3af; font-size: 12px;
-      cursor: pointer; transition: all 0.15s; font-weight: 500;
-    }
-    .toolbar-model-pill:hover { background: #f3f4f6; color: #4b5563; }
-    .send-btn-dark {
-      display: inline-flex; align-items: center; gap: 6px;
-      padding: 6px 16px; border-radius: 20px; border: none;
-      background: #111827; color: #fff; font-size: 12px; font-weight: 500;
-      cursor: pointer; transition: background 0.15s;
-    }
-    .send-btn-dark:hover { background: #1f2937; }
-    .send-btn-dark:disabled { opacity: 0.5; cursor: not-allowed; }
-
-    .suggestion-pill {
-      display: inline-flex; align-items: center;
-      padding: 7px 14px; border-radius: 20px;
-      background: #f9fafb; border: 1px solid #f3f4f6;
-      font-size: 12px; color: #6b7280; cursor: pointer;
-      transition: all 0.15s; white-space: nowrap;
-    }
-    .suggestion-pill:hover { background: #f3f4f6; border-color: #e5e7eb; color: #374151; }
-
-    .service-icon-item {
-      display: flex; flex-direction: column; align-items: center; gap: 6px;
-      cursor: pointer; transition: transform 0.15s; min-width: 64px;
-    }
-    .service-icon-item:hover { transform: translateY(-2px); }
-    .service-icon-circle {
-      width: 44px; height: 44px; border-radius: 14px;
-      display: flex; align-items: center; justify-content: center;
-      font-size: 18px;
-    }
-    .service-icon-label { font-size: 10px; color: #6b7280; font-weight: 500; text-align: center; line-height: 1.2; }
-
     /* Mobile Responsive */
     @media (max-width: 768px) {
       .sidebar-btn span { display: none; }
@@ -196,10 +135,6 @@
 
     <!-- Bottom nav -->
     <div class="w-full px-1 space-y-1 border-t border-gray-200 pt-2 mt-2">
-      <a class="sidebar-btn" href="/admin" title="Admin Console">
-        <i class="fas fa-shield-alt"></i>
-        <span>Admin</span>
-      </a>
       <button class="sidebar-btn" onclick="showSettings()" title="Settings">
         <i class="fas fa-cog"></i>
         <span>Settings</span>
@@ -229,10 +164,10 @@
     <!-- ======================================================== -->
     <!-- CHAT PANE -->
     <!-- ======================================================== -->
-    <div id="chatPane" class="flex flex-col border-r border-gray-200" style="width:100%; min-width:0;">
+    <div id="chatPane" class="flex flex-col border-r border-gray-200" style="width:45%; min-width:320px;">
 
-      <!-- Chat header (slim, only shows during active chat) -->
-      <div id="chatHeader" class="bg-white border-b border-gray-200 px-4 py-2.5 flex items-center justify-between shrink-0" style="display:none;">
+      <!-- Chat header -->
+      <div class="bg-white border-b border-gray-200 px-4 py-2.5 flex items-center justify-between shrink-0">
         <div class="flex items-center gap-2">
           <h2 class="text-sm font-semibold text-gray-800">Chat</h2>
           <span class="text-[10px] px-2 py-0.5 rounded-full bg-indigo-50 text-indigo-600 font-semibold">v1.9</span>
@@ -245,136 +180,57 @@
         </div>
       </div>
 
-      <!-- Chat messages (hidden on home, shown during conversation) -->
-      <div id="chatMessages" class="flex-1 overflow-y-auto px-4 py-4 space-y-4 bg-white" style="display:none;">
-      </div>
-
-      <!-- ====================================================== -->
-      <!-- HOME PAGE — Genspark-style centered layout              -->
-      <!-- ====================================================== -->
-      <div id="homePage" class="flex-1 flex flex-col items-center justify-center bg-white px-6">
-
-        <!-- Title -->
-        <h1 class="text-2xl font-bold text-gray-900 mb-8 text-center">Agentic RAG Platform</h1>
-
-        <!-- Input Box -->
-        <div class="w-full max-w-xl mb-3">
-          <div class="home-input-box">
-            <textarea id="chatInput"
-              placeholder="Ask anything, create anything"
-              rows="1"
-              onkeydown="handleInputKeydown(event)"
-              oninput="autoResize(this)"
-            ></textarea>
-            <div class="home-input-toolbar">
-              <div class="toolbar-left">
-                <button class="toolbar-icon-btn" title="Attach file"><i class="fas fa-plus"></i></button>
-                <button class="toolbar-icon-btn" title="GitHub"><i class="fab fa-github" style="color:#24292e"></i></button>
-                <button class="toolbar-icon-btn" title="Attach"><i class="fas fa-paperclip"></i></button>
-                <button class="toolbar-model-pill" title="Model selector">
-                  <i class="fas fa-bolt" style="color:#6366f1; font-size:11px;"></i>
-                  <span>GPT-4o</span>
-                </button>
-              </div>
-              <div class="toolbar-right">
-                <button class="toolbar-icon-btn" title="Voice input"><i class="fas fa-microphone"></i></button>
-                <button onclick="sendMessage()" id="sendBtn" class="send-btn-dark">
-                  <i class="fas fa-plus" style="font-size:10px;"></i>
-                  <span>Send</span>
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <!-- Suggestion pills -->
-        <div class="flex items-center gap-2 mb-10 flex-wrap justify-center max-w-xl">
-          <button class="suggestion-pill" onclick="sendQuickAction('Show me the system status and available tools')">
-            Show system status
-          </button>
-          <button class="suggestion-pill" onclick="sendQuickAction('Create a new web app with a REST API')">
-            Create a web app
-          </button>
-          <button class="suggestion-pill" onclick="sendQuickAction('Search my knowledge base for recent documents')">
-            Search knowledge base
-          </button>
-        </div>
-
-        <!-- AI Developer — primary action card -->
-        <div onclick="switchToChatMode()" class="mb-8 cursor-pointer group" style="max-width:420px;width:100%;">
-          <div class="flex items-center gap-4 bg-gradient-to-r from-gray-900 to-gray-800 rounded-2xl px-6 py-4 shadow-lg group-hover:shadow-xl transition-all group-hover:scale-[1.02]" style="position:relative;">
-            <div class="flex-shrink-0 w-12 h-12 rounded-xl bg-indigo-500 flex items-center justify-center">
-              <i class="fas fa-code text-white text-lg"></i>
-            </div>
-            <div class="flex-1 min-w-0">
-              <div class="flex items-center gap-2">
-                <span class="text-white font-semibold text-base">AI Developer</span>
-                <span class="inline-flex items-center gap-1 bg-emerald-500/20 text-emerald-400 text-[10px] font-medium px-2 py-0.5 rounded-full">
-                  <span class="w-1.5 h-1.5 bg-emerald-400 rounded-full animate-pulse"></span> Online
-                </span>
-              </div>
-              <p class="text-gray-400 text-xs mt-0.5 truncate">Full-stack workspace &middot; Chat, code, preview, deploy</p>
-            </div>
-            <i class="fas fa-arrow-right text-gray-500 group-hover:text-white transition-colors"></i>
-          </div>
-        </div>
-
-        <!-- Service icons row — each opens its own AI agent page -->
-        <div class="flex items-start gap-5 flex-wrap justify-center max-w-2xl">
-          <div class="service-icon-item" onclick="navigateToAgent('ai-slides')">
-            <div class="service-icon-circle" style="background:#ecfdf5;"><i class="fas fa-file-powerpoint" style="color:#10b981;"></i></div>
-            <span class="service-icon-label">AI Slides</span>
-          </div>
-          <div class="service-icon-item" onclick="navigateToAgent('ai-sheets')">
-            <div class="service-icon-circle" style="background:#f0fdf4;"><i class="fas fa-table" style="color:#22c55e;"></i></div>
-            <span class="service-icon-label">AI Sheets</span>
-          </div>
-          <div class="service-icon-item" onclick="navigateToAgent('ai-docs')">
-            <div class="service-icon-circle" style="background:#eff6ff;"><i class="fas fa-file-alt" style="color:#3b82f6;"></i></div>
-            <span class="service-icon-label">AI Docs</span>
-          </div>
-          <div class="service-icon-item" onclick="navigateToAgent('ai-designer')">
-            <div class="service-icon-circle" style="background:#fdf4ff;"><i class="fas fa-pen-ruler" style="color:#a855f7;"></i></div>
-            <span class="service-icon-label">AI Designer</span>
-          </div>
-          <div class="service-icon-item" onclick="switchToChatMode(); sendQuickAction('Start a new chat conversation')" style="position:relative;">
-            <div class="service-icon-circle" style="background:#eef2ff;"><i class="fas fa-comment-dots" style="color:#6366f1;"></i></div>
-            <div style="position:absolute;top:0;right:14px;width:8px;height:8px;background:#3b82f6;border-radius:50%;border:2px solid #fff;"></div>
-            <span class="service-icon-label">AI Chat</span>
-          </div>
-          <div class="service-icon-item" onclick="navigateToAgent('ai-image')">
-            <div class="service-icon-circle" style="background:#fff7ed;"><i class="fas fa-image" style="color:#f97316;"></i></div>
-            <span class="service-icon-label">AI Image</span>
-          </div>
-          <div class="service-icon-item" onclick="navigateToAgent('ai-music')">
-            <div class="service-icon-circle" style="background:#fef2f2;"><i class="fas fa-music" style="color:#ef4444;"></i></div>
-            <span class="service-icon-label">AI Music</span>
-          </div>
-          <div class="service-icon-item" onclick="navigateToAgent('ai-video')">
-            <div class="service-icon-circle" style="background:#ecfdf5;"><i class="fas fa-video" style="color:#14b8a6;"></i></div>
-            <span class="service-icon-label">AI Video</span>
-          </div>
-          <div class="service-icon-item" onclick="navigateToAgent('ai-meeting-notes')">
-            <div class="service-icon-circle" style="background:#ecfdf5;"><i class="fas fa-clipboard-list" style="color:#0ea5e9;"></i></div>
-            <span class="service-icon-label">AI Meeting<br>Notes</span>
-          </div>
-          <div class="service-icon-item" onclick="navigateToAgent('ai-agents')">
-            <div class="service-icon-circle" style="background:#f5f5f5;"><i class="fas fa-star-of-life" style="color:#9ca3af;"></i></div>
-            <span class="service-icon-label">All Agents</span>
-          </div>
-        </div>
-
-        <!-- Token counter (subtle at bottom) -->
-        <div class="mt-6 text-[11px] text-gray-400">
-          <span id="tokenCounter">Tokens: 0 | Cost: $0.00</span>
-        </div>
-      </div>
-
-      <!-- Chat input area (hidden on home, shown during active conversation) -->
-      <div id="chatInputArea" class="border-t border-gray-200 bg-white p-3" style="display:none;">
+      <!-- Chat messages -->
+      <div id="chatMessages" class="flex-1 overflow-y-auto px-4 py-4 space-y-4 bg-white">
+        <!-- Welcome -->
         <div class="max-w-2xl mx-auto">
+          <div class="text-center py-16">
+            <div class="w-16 h-16 bg-indigo-50 rounded-2xl flex items-center justify-center mx-auto mb-4">
+              <i class="fas fa-robot text-indigo-500 text-2xl"></i>
+            </div>
+            <h2 class="text-xl font-bold text-gray-800 mb-2">Chat to build anything</h2>
+            <p class="text-gray-500 text-sm max-w-md mx-auto mb-8">
+              Write code, search knowledge base, manage files, deploy — all in natural language.
+            </p>
+            <div class="flex flex-wrap justify-center gap-2">
+              <button onclick="sendQuickAction('Show me the system status and available tools')"
+                class="px-3 py-1.5 bg-gray-50 hover:bg-gray-100 rounded-lg text-xs text-gray-600 transition border border-gray-200">
+                <i class="fas fa-heartbeat mr-1 text-green-500"></i>System Status
+              </button>
+              <button onclick="sendQuickAction('Create a new Hono web app with a REST API and Tailwind frontend')"
+                class="px-3 py-1.5 bg-gray-50 hover:bg-gray-100 rounded-lg text-xs text-gray-600 transition border border-gray-200">
+                <i class="fas fa-code mr-1 text-blue-500"></i>Create Web App
+              </button>
+              <button onclick="sendQuickAction('Search the web for the latest Hono framework features')"
+                class="px-3 py-1.5 bg-gray-50 hover:bg-gray-100 rounded-lg text-xs text-gray-600 transition border border-gray-200">
+                <i class="fas fa-search mr-1 text-yellow-500"></i>Web Search
+              </button>
+              <button onclick="sendQuickAction('List my GitHub repositories')"
+                class="px-3 py-1.5 bg-gray-50 hover:bg-gray-100 rounded-lg text-xs text-gray-600 transition border border-gray-200">
+                <i class="fab fa-github mr-1 text-gray-500"></i>GitHub Repos
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Chat input area -->
+      <div class="border-t border-gray-200 bg-white p-3">
+        <div class="max-w-2xl mx-auto">
+          <!-- Input tabs -->
+          <div class="flex items-center gap-1 mb-2">
+            <div class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-indigo-50 text-xs text-indigo-600 font-medium cursor-pointer">
+              <i class="fas fa-code text-[10px]"></i>
+              <span>AI Developer</span>
+            </div>
+            <div class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs text-gray-400 hover:text-gray-600 hover:bg-gray-50 cursor-pointer transition">
+              <i class="fas fa-search text-[10px]"></i>
+              <span>RAG Search</span>
+            </div>
+          </div>
+          <!-- Textarea -->
           <div class="relative">
-            <textarea id="chatInputActive"
+            <textarea id="chatInput"
               placeholder="Ask anything, create anything..."
               rows="1"
               onkeydown="handleInputKeydown(event)"
@@ -389,27 +245,27 @@
                 <i class="fas fa-brain text-indigo-500" style="font-size:10px"></i>
                 <span class="text-gray-600">GPT-4o</span>
               </div>
-              <button onclick="sendMessage()" id="sendBtnActive"
-                class="w-7 h-7 bg-gray-900 hover:bg-gray-700 rounded-lg flex items-center justify-center transition">
+              <button onclick="sendMessage()" id="sendBtn"
+                class="w-7 h-7 bg-indigo-600 hover:bg-indigo-500 rounded-lg flex items-center justify-center transition">
                 <i class="fas fa-arrow-up text-white text-xs"></i>
               </button>
             </div>
           </div>
           <div class="flex items-center justify-between mt-1.5 text-[11px] text-gray-400">
             <span>Enter to send · Shift+Enter for new line</span>
-            <span id="tokenCounterActive">Tokens: 0 | Cost: $0.00</span>
+            <span id="tokenCounter">Tokens: 0 | Cost: $0.00</span>
           </div>
         </div>
       </div>
     </div>
 
-    <!-- Resize handle (hidden on home) -->
-    <div class="resize-handle" id="mainResize" style="display:none;"></div>
+    <!-- Resize handle -->
+    <div class="resize-handle" id="mainResize"></div>
 
     <!-- ======================================================== -->
-    <!-- WORKSPACE PANEL (hidden on home, shown in chat mode)     -->
+    <!-- WORKSPACE PANEL -->
     <!-- ======================================================== -->
-    <div id="workspacePane" class="flex-1 flex flex-col min-w-0 bg-white" style="display:none;">
+    <div id="workspacePane" class="flex-1 flex flex-col min-w-0 bg-white">
 
       <!-- Tab bar -->
       <div class="bg-white border-b border-gray-200 shrink-0">

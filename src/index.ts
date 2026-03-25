@@ -19,7 +19,6 @@ import systemRoutes from './routes/system.js';
 import authRoutes from './routes/auth.js';
 import memoryRoutes from './routes/memory.js';
 import sandboxRoutes from './routes/sandbox.js';
-import adminRoutes from './routes/admin.js';
 
 import fs from 'fs/promises';
 import path from 'path';
@@ -73,7 +72,6 @@ app.route('/api/system', systemRoutes);
 app.route('/api/auth', authRoutes);
 app.route('/api/memory', memoryRoutes);
 app.route('/api/sandbox', sandboxRoutes);
-app.route('/api/admin', adminRoutes);
 
 // ============================================================
 // HEALTH CHECK — Enhanced with detailed system state
@@ -121,33 +119,6 @@ app.get('/', async (c) => {
     return c.html(generateFallbackHTML());
   }
 });
-
-// ============================================================
-// AI AGENT PAGES — Each service icon has its own full-page agent
-// ============================================================
-const agentPages: Record<string, string> = {
-  '/ai-slides': 'public/ai-slides.html',
-  '/ai-sheets': 'public/ai-sheets.html',
-  '/ai-docs': 'public/ai-docs.html',
-  '/ai-designer': 'public/ai-designer.html',
-  '/ai-image': 'public/ai-image.html',
-  '/ai-music': 'public/ai-music.html',
-  '/ai-video': 'public/ai-video.html',
-  '/ai-meeting-notes': 'public/ai-meeting-notes.html',
-  '/ai-agents': 'public/ai-agents.html',
-  '/admin': 'public/admin.html',
-};
-
-for (const [route, file] of Object.entries(agentPages)) {
-  app.get(route, async (c) => {
-    try {
-      const html = await fs.readFile(path.resolve(file), 'utf-8');
-      return c.html(html);
-    } catch {
-      return c.notFound();
-    }
-  });
-}
 
 // Catch-all for SPA routing (but NOT for /api/* or /ws)
 app.get('*', async (c) => {
