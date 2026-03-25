@@ -300,6 +300,25 @@
           </button>
         </div>
 
+        <!-- AI Developer — primary action card -->
+        <div onclick="switchToChatMode()" class="mb-8 cursor-pointer group" style="max-width:420px;width:100%;">
+          <div class="flex items-center gap-4 bg-gradient-to-r from-gray-900 to-gray-800 rounded-2xl px-6 py-4 shadow-lg group-hover:shadow-xl transition-all group-hover:scale-[1.02]" style="position:relative;">
+            <div class="flex-shrink-0 w-12 h-12 rounded-xl bg-indigo-500 flex items-center justify-center">
+              <i class="fas fa-code text-white text-lg"></i>
+            </div>
+            <div class="flex-1 min-w-0">
+              <div class="flex items-center gap-2">
+                <span class="text-white font-semibold text-base">AI Developer</span>
+                <span class="inline-flex items-center gap-1 bg-emerald-500/20 text-emerald-400 text-[10px] font-medium px-2 py-0.5 rounded-full">
+                  <span class="w-1.5 h-1.5 bg-emerald-400 rounded-full animate-pulse"></span> Online
+                </span>
+              </div>
+              <p class="text-gray-400 text-xs mt-0.5 truncate">Full-stack workspace &middot; Chat, code, preview, deploy</p>
+            </div>
+            <i class="fas fa-arrow-right text-gray-500 group-hover:text-white transition-colors"></i>
+          </div>
+        </div>
+
         <!-- Service icons row — each opens its own AI agent page -->
         <div class="flex items-start gap-5 flex-wrap justify-center max-w-2xl">
           <div class="service-icon-item" onclick="navigateToAgent('ai-slides')">
