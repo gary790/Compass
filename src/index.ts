@@ -19,6 +19,7 @@ import systemRoutes from './routes/system.js';
 import authRoutes from './routes/auth.js';
 import memoryRoutes from './routes/memory.js';
 import sandboxRoutes from './routes/sandbox.js';
+import adminRoutes from './routes/admin.js';
 
 import fs from 'fs/promises';
 import path from 'path';
@@ -72,6 +73,7 @@ app.route('/api/system', systemRoutes);
 app.route('/api/auth', authRoutes);
 app.route('/api/memory', memoryRoutes);
 app.route('/api/sandbox', sandboxRoutes);
+app.route('/api/admin', adminRoutes);
 
 // ============================================================
 // HEALTH CHECK — Enhanced with detailed system state

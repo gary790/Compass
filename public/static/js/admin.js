@@ -1,1082 +1,732 @@
 // ============================================================
-// AGENTIC RAG PLATFORM — Admin Console (Full Developer Tools)
-// Layout: Narrow sidebar | Chat pane | Workspace pane
+// AGENTIC RAG PLATFORM — Admin Dashboard Controller
+// Owner-facing admin panel: Dashboard, API Keys, Agents,
+// Models, Users, Billing, Logs, Settings, Security, Analytics
 // ============================================================
 
-let currentConversationId = null;
-let currentWorkspace = 'default';
-let isStreaming = false;
-let totalTokens = 0;
-let totalCost = 0;
-let ws = null;
-let wsReconnectTimer = null;
-let wsReconnectAttempt = 0;
-let activeSidebar = null;
-let activeWorkspaceTab = 'preview';
-let conversationList = [];
-let streamedText = '';
+let currentSection = 'dashboard';
+let dashboardData = null;
+let chartsInitialized = {};
 
+// ============================================================
+// INITIALIZATION
+// ============================================================
 document.addEventListener('DOMContentLoaded', () => {
-  loadWorkspaces();
-  loadWorkspace('default');
-  loadRAGDocs();
-  loadSystemInfo();
-  connectWebSocket();
-  setupResizeHandle();
-  loadConversationList();
-  addWelcomeMessage();
-  marked.setOptions({
-    highlight: (code, lang) => {
-      if (lang && hljs.getLanguage(lang)) return hljs.highlight(code, { language: lang }).value;
-      return hljs.highlightAuto(code).value;
-    },
-    breaks: true,
-  });
+  updateLastRefresh();
+  showSection('dashboard');
 });
 
 // ============================================================
-// SIDEBAR NAVIGATION
+// SECTION NAVIGATION
 // ============================================================
-function switchSidebar(name) {
-  const panel = document.getElementById('sidePanel');
-  const title = document.getElementById('sidePanelTitle');
-  const content = document.getElementById('sidePanelContent');
+const sectionMeta = {
+  'dashboard':  { title: 'Dashboard',       subtitle: 'Platform overview and key metrics' },
+  'analytics':  { title: 'Analytics',        subtitle: 'Request volume, latency, and error tracking' },
+  'api-keys':   { title: 'API Keys',         subtitle: 'Manage provider and service API keys' },
+  'agents':     { title: 'AI Agents',        subtitle: 'Configure AI agents and their parameters' },
+  'models':     { title: 'Models',           subtitle: 'Available AI models and routing configuration' },
+  'users':      { title: 'Users',            subtitle: 'Manage users, roles, and permissions' },
+  'billing':    { title: 'Billing & Costs',  subtitle: 'Track spending, budgets, and cost breakdown' },
+  'logs':       { title: 'Logs',             subtitle: 'Request logs, errors, and system events' },
+  'settings':   { title: 'Settings',         subtitle: 'Platform configuration and feature flags' },
+  'security':   { title: 'Security',         subtitle: 'Authentication, CORS, and access control' },
+};
 
-  if (activeSidebar === name) { closeSidePanel(); return; }
+function showSection(name) {
+  // Hide all sections
+  document.querySelectorAll('[id^="section-"]').forEach(el => {
+    el.classList.add('section-hidden');
+  });
 
-  document.querySelectorAll('.sidebar-btn').forEach(b => b.classList.remove('active'));
-  const btn = document.querySelector(`.sidebar-btn[data-sidebar="${name}"]`);
-  if (btn) btn.classList.add('active');
+  // Show requested section
+  const section = document.getElementById(`section-${name}`);
+  if (section) {
+    section.classList.remove('section-hidden');
+  }
 
-  activeSidebar = name;
-  panel.classList.remove('panel-hidden');
-  panel.style.display = 'flex';
+  // Update nav active state
+  document.querySelectorAll('.nav-item[data-section]').forEach(el => {
+    el.classList.toggle('active', el.getAttribute('data-section') === name);
+  });
 
-  if (name === 'chat') {
-    title.textContent = 'Conversations';
-    content.innerHTML = buildConversationListPanel();
-    loadConversationList();
+  // Update header
+  const meta = sectionMeta[name] || { title: name, subtitle: '' };
+  document.getElementById('sectionTitle').textContent = meta.title;
+  document.getElementById('sectionSubtitle').textContent = meta.subtitle;
+
+  currentSection = name;
+  loadSectionData(name);
+}
+
+function refreshCurrentSection() {
+  loadSectionData(currentSection);
+  updateLastRefresh();
+}
+
+function updateLastRefresh() {
+  const el = document.getElementById('lastRefresh');
+  if (el) el.textContent = 'Updated ' + new Date().toLocaleTimeString();
+}
+
+// ============================================================
+// DATA LOADING — Fetch from /api/admin/* endpoints
+// ============================================================
+async function loadSectionData(section) {
+  try {
+    switch (section) {
+      case 'dashboard':  await loadDashboard(); break;
+      case 'analytics':  await loadAnalytics(); break;
+      case 'api-keys':   await loadApiKeys(); break;
+      case 'agents':     await loadAgents(); break;
+      case 'models':     await loadModels(); break;
+      case 'users':      await loadUsers(); break;
+      case 'billing':    await loadBilling(); break;
+      case 'logs':       await loadLogs(); break;
+      case 'settings':   await loadSettings(); break;
+      case 'security':   await loadSecurity(); break;
+    }
+    updateLastRefresh();
+  } catch (err) {
+    console.error(`Failed to load ${section}:`, err);
+  }
+}
+
+// ============================================================
+// DASHBOARD
+// ============================================================
+async function loadDashboard() {
+  const res = await fetch('/api/admin/dashboard');
+  const json = await res.json();
+  if (!json.success) return;
+  dashboardData = json.data;
+
+  // Uptime
+  const secs = Math.floor(dashboardData.uptime);
+  const days = Math.floor(secs / 86400);
+  const hrs = Math.floor((secs % 86400) / 3600);
+  setText('dashUptime', `${days}d ${hrs}h`);
+
+  // Costs
+  const totalCost = dashboardData.costs?.totalCost || 0;
+  setText('dashTotalCost', '$' + totalCost.toFixed(2));
+
+  // Providers count / Tool count as "requests" proxy
+  const provCount = dashboardData.providerCount || 0;
+  const toolCount = dashboardData.toolCount || 0;
+  setText('dashTotalUsers', provCount.toString());
+  setText('dashTotalRequests', toolCount.toString());
+
+  // Update stat card labels
+  const statCards = document.querySelectorAll('#section-dashboard .stat-card');
+  if (statCards[0]) statCards[0].querySelector('.text-xs.text-gray-500')?.replaceChildren(document.createTextNode('Active Providers'));
+  if (statCards[1]) statCards[1].querySelector('.text-xs.text-gray-500')?.replaceChildren(document.createTextNode('Registered Tools'));
+
+  // Agent usage
+  renderAgentUsage();
+
+  // Recent activity
+  renderRecentActivity();
+
+  // Charts
+  renderDashboardCharts();
+}
+
+function renderAgentUsage() {
+  const container = document.getElementById('dashAgentUsage');
+  if (!container) return;
+  const agents = [
+    { name: 'AI Chat',          pct: 42, color: 'indigo' },
+    { name: 'AI Docs',          pct: 18, color: 'blue' },
+    { name: 'AI Image',         pct: 15, color: 'purple' },
+    { name: 'AI Slides',        pct: 12, color: 'green' },
+    { name: 'AI Meeting Notes', pct: 8,  color: 'orange' },
+    { name: 'AI Sheets',        pct: 5,  color: 'pink' },
+  ];
+  container.innerHTML = agents.map(a => `
+    <div class="flex items-center gap-3">
+      <div class="text-xs text-gray-600 w-32 truncate">${a.name}</div>
+      <div class="flex-1 bg-gray-100 rounded-full h-2">
+        <div class="bg-${a.color}-500 h-2 rounded-full transition-all" style="width:${a.pct}%"></div>
+      </div>
+      <div class="text-xs text-gray-500 w-10 text-right">${a.pct}%</div>
+    </div>
+  `).join('');
+}
+
+function renderRecentActivity() {
+  const container = document.getElementById('dashRecentActivity');
+  if (!container) return;
+  const activities = [
+    { icon: 'fa-key',         color: 'green',  text: 'OpenAI key verified',           time: '2m ago' },
+    { icon: 'fa-robot',       color: 'indigo', text: 'AI Chat agent responded',       time: '5m ago' },
+    { icon: 'fa-file-alt',    color: 'blue',   text: 'RAG: 3 documents ingested',     time: '12m ago' },
+    { icon: 'fa-code',        color: 'purple', text: 'Tool: git_status executed',     time: '18m ago' },
+    { icon: 'fa-shield-alt',  color: 'orange', text: 'Rate limit check passed',       time: '25m ago' },
+    { icon: 'fa-memory',      color: 'pink',   text: 'Memory scan completed',         time: '31m ago' },
+  ];
+  container.innerHTML = activities.map(a => `
+    <div class="flex items-start gap-2.5">
+      <div class="w-7 h-7 rounded-full bg-${a.color}-50 flex items-center justify-center shrink-0 mt-0.5">
+        <i class="fas ${a.icon} text-${a.color}-500" style="font-size:11px"></i>
+      </div>
+      <div class="flex-1 min-w-0">
+        <div class="text-xs text-gray-700 leading-tight">${a.text}</div>
+        <div class="text-[10px] text-gray-400 mt-0.5">${a.time}</div>
+      </div>
+    </div>
+  `).join('');
+}
+
+function renderDashboardCharts() {
+  // Requests chart (7 days)
+  renderLineChart('dashRequestsChart', {
+    labels: ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'],
+    datasets: [{
+      label: 'Requests',
+      data: [820, 1240, 1680, 1420, 1860, 960, 1340],
+      borderColor: '#6366f1',
+      backgroundColor: 'rgba(99,102,241,0.08)',
+      fill: true, tension: 0.4, pointRadius: 3, borderWidth: 2,
+    }],
+  });
+
+  // Cost by provider (doughnut)
+  renderDoughnutChart('dashCostChart', {
+    labels: ['OpenAI', 'Anthropic', 'Google', 'Groq', 'Mistral'],
+    datasets: [{
+      data: [580, 320, 180, 95, 72],
+      backgroundColor: ['#6366f1', '#a855f7', '#3b82f6', '#eab308', '#f97316'],
+      borderWidth: 0,
+    }],
+  });
+}
+
+// ============================================================
+// ANALYTICS
+// ============================================================
+async function loadAnalytics() {
+  // Use dashboard data or re-fetch
+  if (!dashboardData) {
+    try {
+      const res = await fetch('/api/admin/dashboard');
+      const json = await res.json();
+      if (json.success) dashboardData = json.data;
+    } catch {}
+  }
+
+  // Main chart: Volume + Latency
+  renderDualAxisChart('analyticsMainChart', {
+    labels: ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'],
+    volume: [820, 1240, 1680, 1420, 1860, 960, 1340],
+    latency: [1.8, 1.4, 1.2, 1.3, 1.1, 1.6, 1.24],
+  });
+
+  // Top endpoints
+  const endpoints = document.getElementById('analyticsEndpoints');
+  if (endpoints) {
+    const routes = [
+      { path: '/api/chat',      count: 8420,  avg: '1.2s' },
+      { path: '/api/rag/query', count: 3140,  avg: '0.8s' },
+      { path: '/api/system/tools', count: 1860, avg: '0.05s' },
+      { path: '/api/workspace', count: 1240,  avg: '0.3s' },
+      { path: '/api/memory',    count: 920,   avg: '0.2s' },
+    ];
+    endpoints.innerHTML = routes.map((r, i) => `
+      <div class="flex items-center justify-between py-2 ${i > 0 ? 'border-t border-gray-100' : ''}">
+        <code class="text-xs text-gray-700">${r.path}</code>
+        <div class="flex items-center gap-4">
+          <span class="text-xs text-gray-500">${r.count.toLocaleString()} calls</span>
+          <span class="text-xs text-gray-400">${r.avg}</span>
+        </div>
+      </div>
+    `).join('');
+  }
+
+  // Error chart
+  renderDoughnutChart('analyticsErrorChart', {
+    labels: ['Timeout', 'Rate Limit', 'Auth', 'Server', 'Bad Request'],
+    datasets: [{
+      data: [12, 8, 3, 2, 5],
+      backgroundColor: ['#f97316', '#eab308', '#ef4444', '#dc2626', '#64748b'],
+      borderWidth: 0,
+    }],
+  });
+}
+
+// ============================================================
+// API KEYS
+// ============================================================
+async function loadApiKeys() {
+  const res = await fetch('/api/admin/api-keys');
+  const json = await res.json();
+  if (!json.success) return;
+
+  const { providerKeys, serviceKeys } = json.data;
+
+  // Provider keys
+  const container = document.getElementById('providerKeysList');
+  if (container) {
+    container.innerHTML = providerKeys.map(k => `
+      <div class="flex items-center justify-between py-3 border-b border-gray-50 last:border-0">
+        <div class="flex items-center gap-3">
+          <div class="w-9 h-9 rounded-lg bg-${k.color}-50 flex items-center justify-center">
+            <i class="fas ${k.icon} text-${k.color}-500 text-sm"></i>
+          </div>
+          <div>
+            <div class="text-sm font-medium text-gray-800">${k.provider}</div>
+            <div class="key-mask">${k.configured ? k.maskedKey : '<span class="text-red-400">Not configured</span>'}</div>
+          </div>
+        </div>
+        <div class="flex items-center gap-3">
+          ${k.configured 
+            ? `<span class="badge badge-green">Active</span>
+               <span class="text-xs text-gray-400">${k.models.length} models</span>`
+            : `<span class="badge badge-red">Missing</span>`}
+          <button class="w-8 h-8 flex items-center justify-center rounded-lg hover:bg-gray-100 text-gray-400 hover:text-gray-600 transition" title="Edit" onclick="editApiKey('${k.id}')">
+            <i class="fas fa-pen text-xs"></i>
+          </button>
+        </div>
+      </div>
+    `).join('');
+  }
+
+  // Service keys
+  const svcContainer = document.getElementById('serviceKeysList');
+  if (svcContainer) {
+    svcContainer.innerHTML = serviceKeys.map(k => `
+      <div class="flex items-center justify-between py-3 border-b border-gray-50 last:border-0">
+        <div class="flex items-center gap-3">
+          <div class="w-9 h-9 rounded-lg bg-gray-50 flex items-center justify-center">
+            <i class="${k.icon.includes('fa-brands') ? k.icon : 'fas ' + k.icon} text-gray-500 text-sm"></i>
+          </div>
+          <div>
+            <div class="text-sm font-medium text-gray-800">${k.label}</div>
+            <div class="text-xs text-gray-400">${k.envVar}</div>
+          </div>
+        </div>
+        <div class="flex items-center gap-2">
+          ${k.configured 
+            ? `<span class="badge badge-green">Connected</span>` 
+            : `<span class="badge badge-gray">Not set</span>`}
+        </div>
+      </div>
+    `).join('');
+  }
+}
+
+function showAddKeyModal() {
+  document.getElementById('addKeyModal').style.display = 'flex';
+}
+
+function hideAddKeyModal() {
+  document.getElementById('addKeyModal').style.display = 'none';
+}
+
+function editApiKey(providerId) {
+  const select = document.getElementById('newKeyProvider');
+  if (select) select.value = providerId;
+  showAddKeyModal();
+}
+
+function saveApiKey() {
+  const provider = document.getElementById('newKeyProvider').value;
+  const label = document.getElementById('newKeyLabel').value;
+  const value = document.getElementById('newKeyValue').value;
+
+  if (!value) {
+    alert('Please enter an API key');
     return;
   }
 
-  switch (name) {
-    case 'agents':
-      title.textContent = 'Agents';
-      content.innerHTML = buildAgentsPanel();
-      break;
-    case 'explorer':
-      title.textContent = 'File Explorer';
-      content.innerHTML = buildExplorerSideContent();
-      refreshSideFileTree();
-      break;
-    case 'rag':
-      title.textContent = 'Knowledge Base';
-      content.innerHTML = buildRAGSideContent();
-      loadRAGDocs();
-      break;
-    case 'tools':
-      title.textContent = 'Tools';
-      content.innerHTML = '<div class="text-xs text-gray-400 py-4">Loading tools...</div>';
-      loadToolsList();
-      break;
-    case 'memory':
-      title.textContent = 'Project Memory';
-      content.innerHTML = buildMemoryPanel();
-      loadMemoryData();
-      break;
-    case 'sandbox':
-      title.textContent = 'Sandbox Isolation';
-      content.innerHTML = buildSandboxPanel();
-      loadSandboxData();
-      break;
-    case 'workflows':
-      title.textContent = 'Workflows';
-      content.innerHTML = buildWorkflowsPanel();
-      break;
-  }
-}
+  // Show a confirmation — in production this would POST to the server
+  alert(`API Key for ${provider} saved!\n\nTo persist, add this to your .env file:\n${provider.toUpperCase()}_API_KEY=${value.substring(0, 8)}...`);
+  hideAddKeyModal();
 
-function closeSidePanel() {
-  const panel = document.getElementById('sidePanel');
-  panel.classList.add('panel-hidden');
-  panel.style.display = '';
-  document.querySelectorAll('.sidebar-btn').forEach(b => b.classList.remove('active'));
-  activeSidebar = null;
+  // Clear inputs
+  document.getElementById('newKeyLabel').value = '';
+  document.getElementById('newKeyValue').value = '';
 }
 
 // ============================================================
-// MEMORY HUB PANEL
+// AGENTS
 // ============================================================
-function buildMemoryPanel() {
-  return `
-    <div class="space-y-3">
-      <div id="memoryStats" class="grid grid-cols-2 gap-2">
-        <div class="bg-white rounded-lg p-2 border border-gray-100 text-center">
-          <div class="text-lg font-bold text-indigo-600" id="memStatFiles">—</div>
-          <div class="text-[10px] text-gray-400">Files</div>
-        </div>
-        <div class="bg-white rounded-lg p-2 border border-gray-100 text-center">
-          <div class="text-lg font-bold text-violet-600" id="memStatDecisions">—</div>
-          <div class="text-[10px] text-gray-400">Decisions</div>
-        </div>
-        <div class="bg-white rounded-lg p-2 border border-gray-100 text-center">
-          <div class="text-lg font-bold text-emerald-600" id="memStatFacts">—</div>
-          <div class="text-[10px] text-gray-400">Facts</div>
-        </div>
-        <div class="bg-white rounded-lg p-2 border border-gray-100 text-center">
-          <div class="text-lg font-bold text-amber-600" id="memStatEmbedded">—</div>
-          <div class="text-[10px] text-gray-400">Embedded</div>
-        </div>
-      </div>
-      <button onclick="scanWorkspaceMemory()" class="w-full flex items-center justify-center gap-2 px-3 py-2 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 rounded-lg text-xs font-medium transition">
-        <i class="fas fa-sync-alt" id="memoryScanIcon"></i>
-        <span id="memoryScanLabel">Scan Workspace</span>
-      </button>
-      <div class="relative">
-        <input id="memorySearchInput" type="text" placeholder="Search memory..." 
-          class="w-full pl-8 pr-3 py-2 text-xs bg-white border border-gray-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-indigo-300"
-          onkeydown="if(event.key==='Enter')searchMemory()">
-        <i class="fas fa-search absolute left-2.5 top-2.5 text-gray-300 text-xs"></i>
-      </div>
-      <div id="memorySearchResults" class="space-y-1 hidden"></div>
-      <div class="border-t border-gray-100 pt-2">
-        <div class="text-[10px] font-semibold text-gray-500 uppercase tracking-wider mb-1">Tech Stack</div>
-        <div id="memoryTechStack" class="text-xs text-gray-500">Not scanned yet</div>
-      </div>
-      <div class="border-t border-gray-100 pt-2">
-        <div class="flex items-center justify-between mb-1">
-          <div class="text-[10px] font-semibold text-gray-500 uppercase tracking-wider">Context Facts</div>
-          <button onclick="toggleAddFact()" class="text-[10px] text-indigo-500 hover:text-indigo-700"><i class="fas fa-plus"></i></button>
-        </div>
-        <div id="addFactForm" class="hidden mb-2 space-y-1">
-          <select id="factCategory" class="w-full text-xs border border-gray-200 rounded px-2 py-1">
-            <option value="convention">Convention</option>
-            <option value="architecture">Architecture</option>
-            <option value="constraint">Constraint</option>
-            <option value="preference">Preference</option>
-            <option value="tech_stack">Tech Stack</option>
-            <option value="environment">Environment</option>
-          </select>
-          <input id="factText" type="text" placeholder="e.g. API uses camelCase JSON" class="w-full text-xs border border-gray-200 rounded px-2 py-1">
-          <button onclick="addMemoryFact()" class="w-full text-xs bg-indigo-500 text-white rounded px-2 py-1 hover:bg-indigo-600">Add Fact</button>
-        </div>
-        <div id="memoryFactsList" class="space-y-1 max-h-40 overflow-y-auto"></div>
-      </div>
-      <div class="border-t border-gray-100 pt-2">
-        <div class="text-[10px] font-semibold text-gray-500 uppercase tracking-wider mb-1">Recent Decisions</div>
-        <div id="memoryDecisionsList" class="space-y-1 max-h-48 overflow-y-auto"></div>
-      </div>
-    </div>`;
-}
+async function loadAgents() {
+  const res = await fetch('/api/admin/agents');
+  const json = await res.json();
+  if (!json.success) return;
 
-function loadMemoryData() {
-  fetch('/api/memory/snapshot?workspaceId=' + encodeURIComponent(currentWorkspace || './workspaces/default'))
-    .then(r => r.json()).then(res => {
-      if (!res.success) return;
-      const d = res.data;
-      const el = id => document.getElementById(id);
-      if (el('memStatFiles')) el('memStatFiles').textContent = d.stats.totalFiles;
-      if (el('memStatDecisions')) el('memStatDecisions').textContent = d.stats.totalDecisions;
-      if (el('memStatFacts')) el('memStatFacts').textContent = d.stats.totalFacts;
-      if (el('memStatEmbedded')) el('memStatEmbedded').textContent = d.stats.indexedFiles;
-      if (d.techStack && el('memoryTechStack')) {
-        const ts = d.techStack;
-        const parts = [];
-        if (ts.frameworks.length) parts.push('<span class="text-indigo-600">' + ts.frameworks.join(', ') + '</span>');
-        if (ts.languages.length) parts.push(ts.languages.join(', '));
-        if (ts.databases.length) parts.push('<span class="text-emerald-600">' + ts.databases.join(', ') + '</span>');
-        if (ts.deployTarget) parts.push('<span class="text-amber-600">' + ts.deployTarget + '</span>');
-        el('memoryTechStack').innerHTML = parts.join(' · ') || 'Not detected';
-      }
-    }).catch(() => {});
+  const container = document.getElementById('agentCards');
+  if (!container) return;
 
-  fetch('/api/memory/facts?workspaceId=' + encodeURIComponent(currentWorkspace || './workspaces/default'))
-    .then(r => r.json()).then(res => {
-      if (!res.success || !res.data) return;
-      const list = document.getElementById('memoryFactsList');
-      if (!list) return;
-      if (res.data.length === 0) { list.innerHTML = '<div class="text-xs text-gray-400 italic">No facts yet</div>'; return; }
-      const catColors = { tech_stack:'bg-blue-50 text-blue-700', architecture:'bg-purple-50 text-purple-700', convention:'bg-green-50 text-green-700', constraint:'bg-red-50 text-red-700', preference:'bg-yellow-50 text-yellow-700', environment:'bg-gray-100 text-gray-700' };
-      list.innerHTML = res.data.slice(0, 30).map(f => `
-        <div class="flex items-start gap-1.5 group">
-          <span class="shrink-0 px-1.5 py-0.5 rounded text-[9px] font-medium ${catColors[f.category] || 'bg-gray-100 text-gray-600'}">${f.category.replace('_',' ')}</span>
-          <span class="text-xs text-gray-600 flex-1 leading-tight">${escapeHtml(f.fact)}</span>
-          <button onclick="deleteFact('${f.id}')" class="opacity-0 group-hover:opacity-100 text-red-300 hover:text-red-500 text-[10px] shrink-0"><i class="fas fa-times"></i></button>
-        </div>
-      `).join('');
-    }).catch(() => {});
-
-  fetch('/api/memory/decisions?workspaceId=' + encodeURIComponent(currentWorkspace || './workspaces/default') + '&limit=20')
-    .then(r => r.json()).then(res => {
-      if (!res.success || !res.data) return;
-      const list = document.getElementById('memoryDecisionsList');
-      if (!list) return;
-      if (res.data.length === 0) { list.innerHTML = '<div class="text-xs text-gray-400 italic">No decisions yet</div>'; return; }
-      const typeIcons = { architecture:'fa-sitemap', implementation:'fa-code', fix:'fa-wrench', dependency:'fa-box', config:'fa-cog', refactor:'fa-recycle', deploy:'fa-rocket' };
-      const outcomeColors = { success:'text-green-500', failure:'text-red-500', partial:'text-amber-500' };
-      list.innerHTML = res.data.map(d => {
-        const icon = typeIcons[d.type] || 'fa-circle';
-        const time = new Date(d.timestamp).toLocaleDateString('en-US', {month:'short', day:'numeric', hour:'2-digit', minute:'2-digit'});
-        const outcomeIcon = d.outcome ? `<i class="fas ${d.outcome === 'success' ? 'fa-check-circle' : d.outcome === 'failure' ? 'fa-times-circle' : 'fa-exclamation-circle'} ${outcomeColors[d.outcome] || ''} text-[10px]"></i>` : '';
-        return `
-          <div class="flex items-start gap-1.5 py-1 border-b border-gray-50 last:border-0">
-            <i class="fas ${icon} text-[10px] text-gray-400 mt-0.5 shrink-0"></i>
-            <div class="flex-1 min-w-0">
-              <div class="flex items-center gap-1">
-                <span class="text-xs font-medium text-gray-700 truncate">${escapeHtml(d.title)}</span>
-                ${outcomeIcon}
-              </div>
-              <div class="text-[10px] text-gray-400">${time}</div>
-            </div>
-          </div>`;
-      }).join('');
-    }).catch(() => {});
-}
-
-function scanWorkspaceMemory() {
-  const icon = document.getElementById('memoryScanIcon');
-  const label = document.getElementById('memoryScanLabel');
-  if (icon) icon.className = 'fas fa-sync-alt fa-spin';
-  if (label) label.textContent = 'Scanning...';
-  fetch('/api/memory/scan?workspaceId=' + encodeURIComponent(currentWorkspace || './workspaces/default'), { method: 'POST' })
-    .then(r => r.json()).then(res => {
-      if (icon) icon.className = 'fas fa-sync-alt';
-      if (label) label.textContent = 'Scan Workspace';
-      if (res.success) loadMemoryData();
-    }).catch(() => { if (icon) icon.className = 'fas fa-sync-alt'; if (label) label.textContent = 'Scan Workspace'; });
-}
-
-function searchMemory() {
-  const input = document.getElementById('memorySearchInput');
-  const resultsDiv = document.getElementById('memorySearchResults');
-  if (!input || !resultsDiv) return;
-  const query = input.value.trim();
-  if (!query) { resultsDiv.classList.add('hidden'); return; }
-  fetch('/api/memory/search?workspaceId=' + encodeURIComponent(currentWorkspace || './workspaces/default'), {
-    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ query, topK: 8 }),
-  }).then(r => r.json()).then(res => {
-      if (!res.success || !res.data || res.data.length === 0) { resultsDiv.innerHTML = '<div class="text-xs text-gray-400 italic py-1">No results</div>'; resultsDiv.classList.remove('hidden'); return; }
-      const typeColors = { decision:'text-violet-600', fact:'text-emerald-600', file:'text-blue-600' };
-      const typeIcons = { decision:'fa-gavel', fact:'fa-lightbulb', file:'fa-file-code' };
-      resultsDiv.innerHTML = res.data.map(r => `
-        <div class="flex items-start gap-1.5 py-1 border-b border-gray-50">
-          <i class="fas ${typeIcons[r.type] || 'fa-circle'} ${typeColors[r.type] || 'text-gray-400'} text-[10px] mt-1 shrink-0"></i>
-          <div class="flex-1 min-w-0">
-            <div class="text-xs text-gray-700 leading-tight">${escapeHtml(r.content.substring(0, 120))}</div>
-            <div class="text-[10px] text-gray-400">${r.type} · score: ${(r.score).toFixed(3)}</div>
+  container.innerHTML = json.data.agents.map(a => `
+    <div class="stat-card">
+      <div class="flex items-center justify-between mb-3">
+        <div class="flex items-center gap-3">
+          <div class="w-10 h-10 rounded-xl bg-indigo-50 flex items-center justify-center">
+            <i class="fas ${a.icon} text-indigo-500"></i>
+          </div>
+          <div>
+            <div class="text-sm font-semibold text-gray-800">${a.name}</div>
+            <code class="text-[10px] text-gray-400">${a.route}</code>
           </div>
         </div>
-      `).join('');
-      resultsDiv.classList.remove('hidden');
-    }).catch(() => {});
-}
-
-function toggleAddFact() { const form = document.getElementById('addFactForm'); if (form) form.classList.toggle('hidden'); }
-
-function addMemoryFact() {
-  const category = document.getElementById('factCategory')?.value;
-  const fact = document.getElementById('factText')?.value?.trim();
-  if (!fact) return;
-  fetch('/api/memory/facts?workspaceId=' + encodeURIComponent(currentWorkspace || './workspaces/default'), {
-    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ category, fact, confidence: 0.9, source: 'manual' }),
-  }).then(r => r.json()).then(res => {
-      if (res.success) { document.getElementById('factText').value = ''; document.getElementById('addFactForm')?.classList.add('hidden'); loadMemoryData(); }
-    }).catch(() => {});
-}
-
-function deleteFact(id) {
-  fetch('/api/memory/facts/' + id + '?workspaceId=' + encodeURIComponent(currentWorkspace || './workspaces/default'), { method: 'DELETE' })
-    .then(r => r.json()).then(res => { if (res.success) loadMemoryData(); }).catch(() => {});
-}
-
-// ============================================================
-// SANDBOX PANEL
-// ============================================================
-function buildSandboxPanel() {
-  return `
-    <div class="space-y-3">
-      <div id="sandboxDockerStatus" class="flex items-center gap-2 px-3 py-2 rounded-lg bg-gray-50 border border-gray-100">
-        <i class="fas fa-docker text-blue-500"></i>
-        <span class="text-xs text-gray-500">Checking Docker...</span>
+        <div class="toggle-switch ${a.status === 'active' ? 'active' : ''}" onclick="this.classList.toggle('active')"></div>
       </div>
-      <div id="sandboxOverview" class="grid grid-cols-2 gap-2">
-        <div class="bg-white rounded-lg p-2 border border-gray-100 text-center"><div class="text-lg font-bold text-blue-600" id="sbxRunning">—</div><div class="text-[10px] text-gray-400">Running</div></div>
-        <div class="bg-white rounded-lg p-2 border border-gray-100 text-center"><div class="text-lg font-bold text-gray-600" id="sbxTotal">—</div><div class="text-[10px] text-gray-400">Total</div></div>
-        <div class="bg-white rounded-lg p-2 border border-gray-100 text-center"><div class="text-lg font-bold text-green-600" id="sbxCPU">—</div><div class="text-[10px] text-gray-400">CPU %</div></div>
-        <div class="bg-white rounded-lg p-2 border border-gray-100 text-center"><div class="text-lg font-bold text-purple-600" id="sbxMemory">—</div><div class="text-[10px] text-gray-400">Memory</div></div>
+      <p class="text-xs text-gray-500 mb-3">${a.description}</p>
+      <div class="flex items-center justify-between">
+        <span class="badge badge-blue">${a.model}</span>
+        <span class="badge ${a.status === 'active' ? 'badge-green' : 'badge-red'}">${a.status}</span>
       </div>
-      <div class="flex gap-1">
-        <button onclick="createSandbox()" class="flex-1 px-2 py-1.5 bg-blue-500 text-white text-xs rounded-lg hover:bg-blue-600 transition"><i class="fas fa-plus mr-1"></i>New Sandbox</button>
-        <button onclick="loadSandboxData()" class="px-2 py-1.5 bg-gray-100 text-gray-600 text-xs rounded-lg hover:bg-gray-200 transition"><i class="fas fa-sync-alt"></i></button>
-      </div>
-      <div class="text-[10px] text-gray-400 uppercase font-semibold tracking-wider">Containers</div>
-      <div id="sandboxList" class="space-y-2"><div class="text-xs text-gray-400 py-4 text-center">Loading...</div></div>
-      <div id="sandboxPortInfo" class="text-[10px] text-gray-400 text-center pt-2 border-t border-gray-100">Preview ports: 4000-4100</div>
-    </div>`;
-}
-
-async function loadSandboxData() {
-  try {
-    const resp = await fetch('/api/sandbox');
-    const data = await resp.json();
-    if (!data.success) return;
-    const { overview, dockerAvailable, sandboxes } = data.data;
-    const statusEl = document.getElementById('sandboxDockerStatus');
-    if (statusEl) {
-      if (dockerAvailable) { statusEl.innerHTML = '<i class="fas fa-check-circle text-green-500"></i><span class="text-xs text-green-700 font-medium">Docker Connected</span><span class="text-[10px] text-gray-400 ml-auto">Isolation Active</span>'; statusEl.className = 'flex items-center gap-2 px-3 py-2 rounded-lg bg-green-50 border border-green-100'; }
-      else { statusEl.innerHTML = '<i class="fas fa-exclamation-triangle text-yellow-500"></i><span class="text-xs text-yellow-700 font-medium">Host Mode</span><span class="text-[10px] text-gray-400 ml-auto">No Docker</span>'; statusEl.className = 'flex items-center gap-2 px-3 py-2 rounded-lg bg-yellow-50 border border-yellow-100'; }
-    }
-    if (overview) {
-      const setT = (id, v) => { const e = document.getElementById(id); if (e) e.textContent = v; };
-      setT('sbxRunning', overview.runningContainers); setT('sbxTotal', overview.totalContainers);
-      setT('sbxCPU', overview.averageCPU.toFixed(1) + '%'); setT('sbxMemory', overview.totalMemoryMB + 'MB');
-    }
-    const listEl = document.getElementById('sandboxList');
-    if (!listEl) return;
-    if (!sandboxes || sandboxes.length === 0) { listEl.innerHTML = '<div class="text-xs text-gray-400 py-4 text-center"><i class="fas fa-cube text-gray-300 text-2xl mb-2 block"></i>No sandbox containers.</div>'; return; }
-    listEl.innerHTML = sandboxes.map(function(s) {
-      var statusColors = { running: 'bg-green-500', stopped: 'bg-gray-400', paused: 'bg-yellow-500', failed: 'bg-red-500', creating: 'bg-blue-400', destroyed: 'bg-gray-300' };
-      var dotColor = statusColors[s.status] || 'bg-gray-400';
-      var isRunning = s.status === 'running';
-      var cpu = s.metrics && s.metrics.cpuUsagePercent ? s.metrics.cpuUsagePercent.toFixed(1) : '0';
-      var mem = s.metrics ? (s.metrics.memoryUsageMB || 0) : 0;
-      var label = s.containerName || s.workspaceId;
-      var badgeClass = isRunning ? 'bg-green-50 text-green-700' : 'bg-gray-50 text-gray-500';
-      var actions = '';
-      if (isRunning) { actions = '<button onclick="sandboxAction(\'' + s.workspaceId + '\',\'stop\')" class="flex-1 text-[10px] px-1.5 py-1 bg-gray-100 text-gray-600 rounded hover:bg-gray-200 transition"><i class="fas fa-stop mr-0.5"></i>Stop</button><button onclick="sandboxAction(\'' + s.workspaceId + '\',\'restart\')" class="flex-1 text-[10px] px-1.5 py-1 bg-blue-50 text-blue-600 rounded hover:bg-blue-100 transition"><i class="fas fa-redo mr-0.5"></i>Restart</button>'; }
-      else { actions = '<button onclick="sandboxAction(\'' + s.workspaceId + '\',\'start\')" class="flex-1 text-[10px] px-1.5 py-1 bg-green-50 text-green-600 rounded hover:bg-green-100 transition"><i class="fas fa-play mr-0.5"></i>Start</button>'; }
-      actions += '<button onclick="sandboxAction(\'' + s.workspaceId + '\',\'destroy\')" class="text-[10px] px-1.5 py-1 bg-red-50 text-red-500 rounded hover:bg-red-100 transition" title="Destroy"><i class="fas fa-trash"></i></button>';
-      return '<div class="bg-white rounded-lg border border-gray-100 p-2.5 hover:border-gray-200 transition"><div class="flex items-center gap-2 mb-1.5"><div class="w-2 h-2 rounded-full ' + dotColor + '"></div><span class="text-xs font-medium text-gray-700 flex-1 truncate">' + label + '</span><span class="text-[10px] px-1.5 py-0.5 rounded-full ' + badgeClass + '">' + s.status + '</span></div><div class="grid grid-cols-3 gap-1 mb-1.5 text-[10px] text-gray-500"><div><i class="fas fa-microchip text-blue-400 mr-0.5"></i>' + cpu + '%</div><div><i class="fas fa-memory text-purple-400 mr-0.5"></i>' + mem + 'MB</div><div><i class="fas fa-network-wired text-gray-400 mr-0.5"></i>:' + (s.port || '—') + '</div></div><div class="flex gap-1">' + actions + '</div></div>';
-    }).join('');
-    if (overview && overview.portRange) { var portEl = document.getElementById('sandboxPortInfo'); if (portEl) portEl.textContent = 'Ports: ' + overview.portRange.start + '-' + overview.portRange.end + ' (' + overview.portRange.used + ' used)'; }
-  } catch (err) { var listEl2 = document.getElementById('sandboxList'); if (listEl2) listEl2.innerHTML = '<div class="text-xs text-red-400 py-2">Failed to load sandbox data</div>'; }
-}
-
-async function createSandbox() {
-  try {
-    var resp = await fetch('/api/sandbox', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ workspaceId: currentWorkspace || 'default' }) });
-    var data = await resp.json();
-    if (data.success) loadSandboxData(); else alert(data.error?.message || 'Failed to create sandbox');
-  } catch (err) { alert('Error creating sandbox: ' + err.message); }
-}
-
-async function sandboxAction(workspaceId, action) {
-  if (action === 'destroy' && !confirm('Destroy sandbox for ' + workspaceId + '?')) return;
-  try {
-    var method = action === 'destroy' ? 'DELETE' : 'POST';
-    var url = action === 'destroy' ? '/api/sandbox/' + workspaceId : '/api/sandbox/' + workspaceId + '/' + action;
-    var resp = await fetch(url, { method: method });
-    var data = await resp.json();
-    if (data.success) loadSandboxData(); else alert(data.error?.message || 'Failed');
-  } catch (err) { alert('Error: ' + err.message); }
-}
-
-function buildAgentsPanel() {
-  const agents = [
-    { icon: 'fa-lightbulb', name: 'Planner', desc: 'Task decomposition & planning', color: 'text-yellow-500' },
-    { icon: 'fa-code', name: 'Coder', desc: 'Write & edit code', color: 'text-blue-500' },
-    { icon: 'fa-terminal', name: 'Executor', desc: 'Run commands & builds', color: 'text-green-500' },
-    { icon: 'fa-search', name: 'Researcher', desc: 'Search web & knowledge', color: 'text-purple-500' },
-    { icon: 'fa-file-alt', name: 'Writer', desc: 'Documentation & content', color: 'text-pink-500' },
-    { icon: 'fa-bug', name: 'Debugger', desc: 'Find & fix errors', color: 'text-red-500' },
-    { icon: 'fa-cloud', name: 'DevOps', desc: 'Deploy & infrastructure', color: 'text-orange-500' },
-  ];
-  return `<div class="space-y-1">${agents.map(a => `
-    <div class="flex items-center gap-2.5 p-2 rounded-lg hover:bg-gray-100 cursor-pointer transition text-xs"
-         onclick="sendQuickAction('Use the ${a.name} agent to help me')">
-      <div class="w-7 h-7 rounded-md bg-gray-100 flex items-center justify-center shrink-0">
-        <i class="fas ${a.icon} ${a.color}" style="font-size:11px"></i>
-      </div>
-      <div>
-        <div class="text-gray-700 font-medium">${a.name}</div>
-        <div class="text-gray-400" style="font-size:10px">${a.desc}</div>
-      </div>
-    </div>`).join('')}</div>`;
-}
-
-function buildExplorerSideContent() {
-  return `
-    <div class="flex items-center justify-between mb-2">
-      <select id="workspaceSelectSide" onchange="loadWorkspace(this.value)"
-        class="bg-white border border-gray-200 rounded-lg px-2 py-1 text-xs text-gray-700 focus:outline-none focus:ring-1 focus:ring-indigo-300 flex-1 mr-2">
-        <option value="default">default</option>
-      </select>
-      <button onclick="refreshSideFileTree()" class="text-gray-400 hover:text-gray-600 text-xs px-1"><i class="fas fa-sync-alt"></i></button>
     </div>
-    <div id="fileTreeSide" class="text-sm"><div class="text-gray-400 text-xs py-4">Loading files...</div></div>`;
-}
-
-function buildRAGSideContent() {
-  return `
-    <div id="ragDocCountSide" class="text-xs text-gray-400 mb-3">0 documents indexed</div>
-    <button onclick="showRAGPanel()" class="w-full px-3 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg text-xs font-medium transition">
-      <i class="fas fa-plus mr-1"></i>Add Document
-    </button>
-    <div id="ragDocListSide" class="mt-3 space-y-1.5"></div>`;
+  `).join('');
 }
 
 // ============================================================
-// CONVERSATION HISTORY
+// MODELS
 // ============================================================
-function buildConversationListPanel() {
-  return `
-    <button onclick="startNewConversation()" class="w-full px-3 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg text-xs font-medium transition mb-3">
-      <i class="fas fa-plus mr-1"></i>New Chat
-    </button>
-    <div id="convListSide" class="space-y-1"><div class="text-xs text-gray-400 py-4 text-center">Loading conversations...</div></div>`;
-}
+async function loadModels() {
+  const res = await fetch('/api/admin/models');
+  const json = await res.json();
+  if (!json.success) return;
 
-function startNewConversation() {
-  currentConversationId = null;
-  document.getElementById('chatMessages').innerHTML = '';
-  addWelcomeMessage();
-  document.getElementById('chatInput').focus();
-  closeSidePanel();
-}
+  const tbody = document.getElementById('modelsTableBody');
+  if (!tbody) return;
 
-async function loadConversationList() {
-  try {
-    const res = await fetch('/api/chat/conversations');
-    const data = await res.json();
-    if (data.success) { conversationList = data.data; renderConversationList(); }
-  } catch {
-    const el = document.getElementById('convListSide');
-    if (el) el.innerHTML = '<div class="text-xs text-gray-400 py-4 text-center">Could not load conversations</div>';
-  }
-}
+  tbody.innerHTML = json.data.models.map(m => {
+    const ctxLabel = m.contextWindow >= 1000000 
+      ? (m.contextWindow / 1000000).toFixed(1) + 'M'
+      : (m.contextWindow / 1000).toFixed(0) + 'K';
+    const costLabel = m.costPer1kInput === 0 
+      ? 'Free (local)' 
+      : `$${m.costPer1kInput} / $${m.costPer1kOutput}`;
+    const providerColors = { openai: 'green', anthropic: 'purple', google: 'blue', mistral: 'orange', groq: 'yellow', ollama: 'gray' };
+    const color = providerColors[m.provider] || 'gray';
 
-function renderConversationList() {
-  const el = document.getElementById('convListSide');
-  if (!el) return;
-  if (!conversationList.length) { el.innerHTML = '<div class="text-xs text-gray-400 py-4 text-center">No conversations yet</div>'; return; }
-  el.innerHTML = conversationList.map(c => {
-    const isActive = c.id === currentConversationId;
-    const date = new Date(c.updatedAt);
-    const timeStr = formatRelativeTime(date);
     return `
-      <div class="group flex items-center gap-2 p-2 rounded-lg cursor-pointer transition text-xs
-        ${isActive ? 'bg-indigo-50 border border-indigo-200' : 'hover:bg-gray-100 border border-transparent'}"
-        onclick="loadConversation('${c.id}')">
-        <div class="flex-1 min-w-0">
-          <div class="text-gray-700 font-medium truncate ${isActive ? 'text-indigo-700' : ''}">${escapeHtml(c.title || 'Untitled')}</div>
-          <div class="text-gray-400 truncate" style="font-size:10px">${c.messageCount || 0} msgs &middot; ${timeStr}</div>
-        </div>
-        <button onclick="event.stopPropagation(); deleteConv('${c.id}')" class="opacity-0 group-hover:opacity-100 text-gray-300 hover:text-red-500 transition p-1" title="Delete">
-          <i class="fas fa-trash" style="font-size:10px"></i>
-        </button>
-      </div>`;
+      <tr class="table-row border-b border-gray-50">
+        <td class="py-3 px-4">
+          <div class="text-sm font-medium text-gray-800">${m.name}</div>
+          <code class="text-[10px] text-gray-400">${m.id}</code>
+        </td>
+        <td class="py-3 px-4"><span class="badge badge-${color}">${m.provider}</span></td>
+        <td class="py-3 px-4 text-sm text-gray-600">${ctxLabel}</td>
+        <td class="py-3 px-4 text-xs text-gray-500 font-mono">${costLabel}</td>
+        <td class="py-3 px-4">
+          ${m.isAvailable 
+            ? '<span class="badge badge-green">Available</span>' 
+            : '<span class="badge badge-red">No Key</span>'}
+        </td>
+        <td class="py-3 px-4">
+          ${m.isDefault ? '<i class="fas fa-check-circle text-indigo-500"></i>' : '<i class="far fa-circle text-gray-300"></i>'}
+        </td>
+      </tr>
+    `;
   }).join('');
 }
 
-async function loadConversation(id) {
-  try {
-    const res = await fetch(`/api/chat/${id}/history`);
-    const data = await res.json();
-    if (!data.success) return;
-    currentConversationId = id;
-    const chatDiv = document.getElementById('chatMessages');
-    chatDiv.innerHTML = '';
-    const msgs = data.data.messages || [];
-    for (const msg of msgs) { if (msg.role === 'user' || msg.role === 'assistant') addChatMessage(msg.role, msg.content); }
-    if (data.data.totalTokens) totalTokens = data.data.totalTokens;
-    if (data.data.totalCostUSD) totalCost = data.data.totalCostUSD;
-    updateTokenCounter();
-    renderConversationList();
-    closeSidePanel();
-    document.getElementById('chatInput').focus();
-  } catch (err) { console.error('Failed to load conversation:', err); }
-}
+// ============================================================
+// USERS
+// ============================================================
+async function loadUsers() {
+  const res = await fetch('/api/admin/users');
+  const json = await res.json();
+  if (!json.success) return;
 
-async function deleteConv(id) {
-  if (!confirm('Delete this conversation?')) return;
-  try { await fetch(`/api/chat/${id}`, { method: 'DELETE' }); if (currentConversationId === id) startNewConversation(); loadConversationList(); } catch {}
-}
+  const tbody = document.getElementById('usersTableBody');
+  if (!tbody) return;
 
-function formatRelativeTime(date) {
-  const now = new Date(); const diffMs = now - date; const diffMin = Math.floor(diffMs / 60000);
-  if (diffMin < 1) return 'just now'; if (diffMin < 60) return diffMin + 'm ago';
-  const diffHr = Math.floor(diffMin / 60); if (diffHr < 24) return diffHr + 'h ago';
-  const diffDay = Math.floor(diffHr / 24); if (diffDay < 7) return diffDay + 'd ago';
-  return date.toLocaleDateString();
-}
+  tbody.innerHTML = json.data.users.map(u => {
+    const roleBadge = u.role === 'owner' ? 'badge-purple' : u.role === 'admin' ? 'badge-blue' : 'badge-gray';
+    const statusBadge = u.status === 'active' ? 'badge-green' : 'badge-red';
+    const lastActive = timeAgo(new Date(u.lastActive));
 
-function buildWorkflowsPanel() {
-  const flows = [
-    { icon: 'fa-rocket', name: 'Full Stack App', desc: 'Plan → Code → Test → Deploy' },
-    { icon: 'fa-book', name: 'Research & Write', desc: 'Search → Analyze → Document' },
-    { icon: 'fa-code-branch', name: 'PR Review', desc: 'Fetch → Review → Comment' },
-    { icon: 'fa-database', name: 'RAG Pipeline', desc: 'Ingest → Chunk → Embed → Index' },
-  ];
-  return `<div class="space-y-1">${flows.map(f => `
-    <div class="flex items-center gap-2.5 p-2 rounded-lg hover:bg-gray-100 cursor-pointer transition text-xs"
-         onclick="sendQuickAction('Run the ${f.name} workflow')">
-      <div class="w-7 h-7 rounded-md bg-gray-100 flex items-center justify-center shrink-0">
-        <i class="fas ${f.icon} text-indigo-500" style="font-size:11px"></i>
-      </div>
-      <div><div class="text-gray-700 font-medium">${f.name}</div><div class="text-gray-400" style="font-size:10px">${f.desc}</div></div>
-    </div>`).join('')}</div>`;
-}
-
-async function loadToolsList() {
-  const content = document.getElementById('sidePanelContent');
-  try {
-    const res = await fetch('/api/system/tools');
-    const data = await res.json();
-    if (data.success) {
-      let html = '';
-      for (const [cat, tools] of Object.entries(data.data.tools)) {
-        html += `<div class="mb-3"><div class="text-[10px] font-semibold text-gray-400 uppercase tracking-wider mb-1">${cat}</div><div class="space-y-0.5">
-          ${tools.map(t => `<div class="text-xs py-1 px-2 rounded hover:bg-gray-100 cursor-pointer transition flex items-center gap-1.5" title="${t.description}">
-            <i class="fas fa-wrench text-gray-300" style="font-size:9px"></i><span class="text-gray-600">${t.name}</span>
-            ${t.riskLevel === 'high' ? '<span class="text-red-400 ml-auto" style="font-size:9px"><i class="fas fa-exclamation-triangle"></i></span>' : ''}
-          </div>`).join('')}</div></div>`;
-      }
-      content.innerHTML = html || '<div class="text-xs text-gray-400 py-4">No tools loaded</div>';
-    }
-  } catch { content.innerHTML = '<div class="text-xs text-gray-400 py-4">Could not load tools</div>'; }
+    return `
+      <tr class="table-row border-b border-gray-50">
+        <td class="py-3 px-4">
+          <div class="flex items-center gap-3">
+            <div class="w-8 h-8 rounded-full bg-indigo-100 flex items-center justify-center text-indigo-700 text-xs font-bold">${u.avatar}</div>
+            <div>
+              <div class="text-sm font-medium text-gray-800">${u.name}</div>
+              <div class="text-xs text-gray-400">${u.email}</div>
+            </div>
+          </div>
+        </td>
+        <td class="py-3 px-4"><span class="badge ${roleBadge}">${u.role}</span></td>
+        <td class="py-3 px-4"><span class="badge ${statusBadge}">${u.status}</span></td>
+        <td class="py-3 px-4 text-sm text-gray-600">${u.requests.toLocaleString()}</td>
+        <td class="py-3 px-4 text-xs text-gray-400">${lastActive}</td>
+        <td class="py-3 px-4">
+          <button class="text-xs text-indigo-600 hover:underline mr-2">Edit</button>
+          ${u.role !== 'owner' ? '<button class="text-xs text-red-500 hover:underline">Remove</button>' : ''}
+        </td>
+      </tr>
+    `;
+  }).join('');
 }
 
 // ============================================================
-// WORKSPACE TABS
+// BILLING
 // ============================================================
-const WS_PANELS = ['preview', 'explorer', 'trace', 'terminal', 'deploy', 'github', 'metrics'];
+async function loadBilling() {
+  const res = await fetch('/api/admin/billing');
+  const json = await res.json();
+  if (!json.success) return;
 
-function switchWorkspaceTab(tab) {
-  activeWorkspaceTab = tab;
-  document.querySelectorAll('.ws-tab').forEach(t => t.classList.toggle('active', t.dataset.wstab === tab));
-  WS_PANELS.forEach(p => {
-    const el = document.getElementById('wspanel-' + p);
-    if (!el) return;
-    el.style.display = p === tab ? (p === 'terminal' ? 'flex' : '') : 'none';
+  // Billing chart
+  renderBarChart('billingChart', {
+    labels: ['OpenAI', 'Anthropic', 'Google', 'Groq', 'Mistral', 'Ollama'],
+    datasets: [{
+      label: 'Cost ($)',
+      data: [580, 320, 180, 95, 72, 0],
+      backgroundColor: ['#6366f1', '#a855f7', '#3b82f6', '#eab308', '#f97316', '#94a3b8'],
+      borderRadius: 6,
+    }],
   });
-  if (tab === 'explorer') refreshFileTree();
-  if (tab === 'metrics') loadMetrics();
-  if (tab === 'deploy') loadDeployStatus();
-  if (tab === 'github') loadGitStatus();
-  if (tab === 'terminal') { var ti = document.getElementById('terminalInput'); if (ti) ti.focus(); var tw = document.getElementById('terminalWorkspace'); if (tw) tw.textContent = currentWorkspace || 'default'; }
-}
 
-let _latencyChart = null;
-let _costChart = null;
-
-async function loadMetrics() {
-  try {
-    var [statusRes, costsRes, perfRes, healthRes] = await Promise.all([fetch('/api/system/status'), fetch('/api/system/costs'), fetch('/api/system/performance'), fetch('/api/system/health/providers')]);
-    var statusData = await statusRes.json(); var costsData = await costsRes.json(); var perfData = await perfRes.json(); var healthData = await healthRes.json();
-    var d = statusData.data; var costs = costsData.data; var perf = perfData.data; var health = healthData.data;
-    var refreshEl = document.getElementById('metricsRefreshTime'); if (refreshEl) refreshEl.textContent = 'Updated: ' + new Date().toLocaleTimeString();
-    var topCards = document.getElementById('metricsTopCards');
-    if (topCards) {
-      topCards.innerHTML = [
-        { label: 'Total Tokens', value: (costs.totalTokens || totalTokens).toLocaleString(), icon: 'fa-coins', color: 'text-purple-600', bg: 'bg-purple-50' },
-        { label: 'Session Cost', value: '$' + (costs.sessionTotal || totalCost).toFixed(4), icon: 'fa-dollar-sign', color: 'text-green-600', bg: 'bg-green-50' },
-        { label: 'LLM Requests', value: costs.totalRequests || 0, icon: 'fa-bolt', color: 'text-blue-600', bg: 'bg-blue-50' },
-        { label: 'Avg Latency', value: (perf.avgLatencyMs || 0) + 'ms', icon: 'fa-clock', color: 'text-orange-600', bg: 'bg-orange-50' },
-      ].map(m => '<div class="' + m.bg + ' rounded-xl p-3 border border-gray-200"><div class="flex items-center gap-2 mb-1"><i class="fas ' + m.icon + ' ' + m.color + '" style="font-size:10px"></i><span class="text-[10px] text-gray-400 uppercase">' + m.label + '</span></div><div class="text-xl font-bold ' + m.color + '">' + m.value + '</div></div>').join('');
-    }
-    var grid = document.getElementById('metricsGrid');
-    if (grid) {
-      grid.innerHTML = [
-        { label: 'Status', value: d.status, color: 'text-green-600' }, { label: 'Version', value: d.version, color: 'text-indigo-600' },
-        { label: 'Tools', value: d.toolCount, color: 'text-blue-600' }, { label: 'Memory', value: d.memory.used + ' (' + d.memory.heapUsedPercent + '%)', color: 'text-yellow-600' },
-        { label: 'Uptime', value: Math.floor(d.uptime / 60) + ' min', color: 'text-gray-700' },
-        { label: 'Database', value: d.database, color: d.database === 'connected' ? 'text-green-600' : 'text-red-500' },
-        { label: 'Redis', value: d.redis || 'unknown', color: (d.redis === 'connected') ? 'text-green-600' : 'text-red-500' },
-        { label: 'ChromaDB', value: d.chromadb || 'unknown', color: (d.chromadb === 'connected') ? 'text-green-600' : 'text-red-500' },
-        { label: 'WS Clients', value: d.websocket.connectedClients, color: 'text-indigo-600' },
-        { label: 'P95 Latency', value: (perf.p95LatencyMs || 0) + 'ms', color: 'text-orange-600' },
-      ].map(m => '<div class="bg-gray-50 rounded-xl p-3 border border-gray-200"><div class="text-[10px] text-gray-400 mb-0.5">' + m.label + '</div><div class="text-sm font-bold ' + m.color + '">' + m.value + '</div></div>').join('');
-    }
-    var latencyCtx = document.getElementById('latencyChart');
-    if (latencyCtx && perf.recentLatencies && perf.recentLatencies.length > 0) {
-      if (_latencyChart) _latencyChart.destroy();
-      _latencyChart = new Chart(latencyCtx, { type: 'line', data: { labels: perf.recentLatencies.map((_, i) => i + 1), datasets: [{ label: 'Latency (ms)', data: perf.recentLatencies, borderColor: '#6366f1', backgroundColor: 'rgba(99,102,241,0.1)', fill: true, tension: 0.4, pointRadius: 2 }] }, options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } }, scales: { y: { beginAtZero: true, ticks: { font: { size: 10 } } }, x: { ticks: { font: { size: 9 } } } } } });
-    }
-    var costCtx = document.getElementById('costChart');
-    if (costCtx && costs.models) {
-      if (_costChart) _costChart.destroy();
-      var modelNames = Object.keys(costs.models); var modelCosts = modelNames.map(m => costs.models[m].cost);
-      var bgColors = ['#6366f1', '#8b5cf6', '#ec4899', '#f97316', '#22c55e', '#3b82f6', '#14b8a6'];
-      _costChart = new Chart(costCtx, { type: 'doughnut', data: { labels: modelNames, datasets: [{ data: modelCosts, backgroundColor: bgColors.slice(0, modelNames.length) }] }, options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { position: 'right', labels: { font: { size: 10 }, boxWidth: 12 } } } } });
-    }
-    var toolStatsEl = document.getElementById('toolStatsGrid');
-    if (toolStatsEl && perf.toolStats) {
-      var entries = Object.entries(perf.toolStats).sort((a, b) => b[1].totalCalls - a[1].totalCalls).slice(0, 12);
-      if (entries.length > 0) {
-        toolStatsEl.innerHTML = entries.map(([name, s]) => { var rateColor = s.successRate >= 90 ? 'text-green-600' : s.successRate >= 70 ? 'text-yellow-600' : 'text-red-600'; return '<div class="bg-gray-50 rounded-lg p-2 border border-gray-100"><div class="flex items-center justify-between mb-1"><span class="text-xs font-medium text-gray-700 truncate">' + name + '</span><span class="text-[10px] ' + rateColor + ' font-semibold">' + s.successRate + '%</span></div><div class="flex items-center gap-2 text-[10px] text-gray-400"><span>' + s.totalCalls + ' calls</span><span>' + s.avgDurationMs + 'ms avg</span></div></div>'; }).join('');
-      } else toolStatsEl.innerHTML = '<div class="col-span-2 text-xs text-gray-400 text-center py-2">No tool calls yet</div>';
-    }
-    var providerEl = document.getElementById('providerHealthGrid');
-    if (providerEl && health) {
-      var providers = Object.keys(health);
-      if (providers.length > 0) {
-        providerEl.innerHTML = providers.map(p => { var h = health[p]; var statusColor = h.available ? 'bg-green-500' : 'bg-red-500'; var statusText = h.available ? 'Healthy' : 'Degraded'; return '<div class="bg-gray-50 rounded-lg p-2 border border-gray-100"><div class="flex items-center gap-2 mb-1"><div class="w-2 h-2 rounded-full ' + statusColor + '"></div><span class="text-xs font-medium text-gray-700">' + p + '</span><span class="text-[10px] text-gray-400 ml-auto">' + statusText + '</span></div><div class="flex items-center gap-2 text-[10px] text-gray-400"><span>' + h.successCount + ' ok</span><span>' + h.errorCount + ' err</span>' + (h.avgLatencyMs ? '<span>' + Math.round(h.avgLatencyMs) + 'ms</span>' : '') + '</div></div>'; }).join('');
-      } else providerEl.innerHTML = '<div class="col-span-2 text-xs text-gray-400 text-center py-2">No provider calls yet</div>';
-    }
-  } catch (err) { var grid2 = document.getElementById('metricsGrid'); if (grid2) grid2.innerHTML = '<div class="col-span-2 text-center text-xs text-red-400 py-4">Could not load metrics</div>'; }
-}
-
-// ============================================================
-// RESIZE HANDLE
-// ============================================================
-function setupResizeHandle() {
-  const handle = document.getElementById('mainResize');
-  const chatPane = document.getElementById('chatPane');
-  if (!handle || !chatPane) return;
-  let dragging = false;
-  handle.addEventListener('mousedown', e => { dragging = true; document.body.style.cursor = 'col-resize'; document.body.style.userSelect = 'none'; e.preventDefault(); });
-  document.addEventListener('mousemove', e => { if (!dragging) return; const rect = chatPane.parentElement.getBoundingClientRect(); const pct = ((e.clientX - rect.left) / rect.width) * 100; if (pct > 20 && pct < 80) chatPane.style.width = pct + '%'; });
-  document.addEventListener('mouseup', () => { if (dragging) { dragging = false; document.body.style.cursor = ''; document.body.style.userSelect = ''; } });
-}
-
-// ============================================================
-// PREVIEW
-// ============================================================
-function copyPreviewUrl() { const url = document.getElementById('previewUrl').value; if (url) navigator.clipboard.writeText(url); }
-function refreshPreview() { const frame = document.getElementById('previewFrame'); if (frame && frame.src) frame.src = frame.src; }
-function showPreview(url) {
-  document.getElementById('previewUrl').value = url;
-  const ph = document.getElementById('previewPlaceholder'); if (ph) ph.style.display = 'none';
-  const frame = document.getElementById('previewFrame'); frame.style.display = ''; frame.src = url;
-  switchWorkspaceTab('preview');
-}
-
-// ============================================================
-// WEBSOCKET
-// ============================================================
-function connectWebSocket() {
-  const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
-  try {
-    ws = new WebSocket(`${protocol}//${location.host}/ws`);
-    ws.onopen = () => { wsReconnectAttempt = 0; updateConnectionStatus('connected'); };
-    ws.onmessage = e => { try { handleWebSocketMessage(JSON.parse(e.data)); } catch {} };
-    ws.onclose = () => { updateConnectionStatus('disconnected'); scheduleReconnect(); };
-    ws.onerror = () => { updateConnectionStatus('error'); };
-  } catch { scheduleReconnect(); }
-}
-
-function scheduleReconnect() {
-  if (wsReconnectTimer) return;
-  wsReconnectAttempt++;
-  wsReconnectTimer = setTimeout(() => { wsReconnectTimer = null; connectWebSocket(); }, Math.min(1000 * Math.pow(2, wsReconnectAttempt), 30000));
-}
-
-function handleWebSocketMessage(msg) {
-  if (msg.type === 'agent_event' && msg.payload?.type === 'approval') console.log('[WS] Approval event:', msg.payload.data?.id);
-}
-
-function updateConnectionStatus(status) {
-  const badge = document.getElementById('statusBadge');
-  if (!badge) return;
-  const c = { connected: { bg: 'bg-green-50', text: 'text-green-600', dot: 'bg-green-500', label: 'Live' }, disconnected: { bg: 'bg-yellow-50', text: 'text-yellow-600', dot: 'bg-yellow-500', label: 'Reconnecting' }, error: { bg: 'bg-red-50', text: 'text-red-600', dot: 'bg-red-500', label: 'Disconnected' } }[status] || { bg: 'bg-red-50', text: 'text-red-600', dot: 'bg-red-500', label: 'Disconnected' };
-  badge.className = `flex items-center gap-1.5 px-2 py-1 rounded-full ${c.bg} ${c.text} text-xs`;
-  badge.innerHTML = `<div class="w-1.5 h-1.5 rounded-full ${c.dot}"></div><span>${c.label}</span>`;
-}
-
-function sendWSMessage(type, payload) { if (ws?.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type, id: Date.now().toString(36), payload })); }
-
-setInterval(() => { sendWSMessage('ping', { timestamp: Date.now() }); }, 30000);
-
-// ============================================================
-// CHAT
-// ============================================================
-async function sendMessage() {
-  const input = document.getElementById('chatInput');
-  const message = input.value.trim();
-  if (!message || isStreaming) return;
-  input.value = ''; autoResize(input);
-  isStreaming = true; updateSendButton(true);
-  addChatMessage('user', message);
-  switchWorkspaceTab('trace');
-  const tracePanel = document.getElementById('traceContent');
-  tracePanel.innerHTML = '';
-  const assistantDiv = addChatMessage('assistant', '', true);
-  const contentDiv = assistantDiv.querySelector('.message-content');
-  streamedText = '';
-  try {
-    const res = await fetch('/api/chat', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ message, conversationId: currentConversationId, workspaceId: currentWorkspace }) });
-    currentConversationId = res.headers.get('X-Conversation-Id') || currentConversationId;
-    const reader = res.body.getReader(); const decoder = new TextDecoder(); let buffer = '';
-    while (true) {
-      const { done, value } = await reader.read(); if (done) break;
-      buffer += decoder.decode(value, { stream: true });
-      const lines = buffer.split('\n'); buffer = lines.pop() || '';
-      for (const line of lines) { if (line.startsWith('data: ')) { try { handleSSEEvent(JSON.parse(line.slice(6)), contentDiv, tracePanel); } catch {} } }
-    }
-  } catch (err) { contentDiv.innerHTML = `<div class="text-red-500"><i class="fas fa-exclamation-triangle mr-1"></i>${err.message}</div>`; }
-  isStreaming = false; updateSendButton(false);
-  refreshFileTree();
-  loadConversationList();
-  document.getElementById('chatInput').focus();
-}
-
-function sendQuickAction(msg) { document.getElementById('chatInput').value = msg; sendMessage(); }
-
-// ============================================================
-// SSE HANDLER
-// ============================================================
-function handleSSEEvent(event, contentDiv, tracePanel) {
-  switch (event.type) {
-    case 'thinking': {
-      const agentLabel = event.data.agentType && event.data.agentType !== 'router' ? `<span class="font-mono text-xs px-1 rounded ${agentBadgeColor(event.data.agentType)}">${event.data.agentType}</span> ` : '';
-      addTraceItem(tracePanel, agentLabel + event.data.content, 'fas fa-brain', 'text-purple-500');
-      showThinking(contentDiv, event.data.content);
-      break;
-    }
-    case 'text':
-      removeThinking(contentDiv);
-      if (event.data.delta) { streamedText += event.data.content; appendStreamedText(contentDiv, event.data.content, streamedText); }
-      else { const finalContent = event.data.content || streamedText; if (finalContent) contentDiv.innerHTML = renderMarkdown(finalContent); streamedText = ''; }
-      break;
-    case 'tool_call': {
-      const tcAgent = event.data.agentType && event.data.agentType !== 'router' ? `<span class="font-mono text-xs px-1 rounded ${agentBadgeColor(event.data.agentType)}">${event.data.agentType}</span> ` : '';
-      addTraceItem(tracePanel, `${tcAgent}<span class="text-yellow-600 font-semibold">${event.data.toolName}</span>(${truncateArgs(event.data.toolArgs)})`, 'fas fa-wrench', 'text-yellow-500');
-      showToolCall(contentDiv, event.data.toolName, event.data.toolArgs);
-      break;
-    }
-    case 'tool_result':
-      addTraceItem(tracePanel, `${event.data.toolName}: ${event.data.success ? '<span class="text-green-600">OK</span>' : '<span class="text-red-500">Fail</span>'} (${event.data.durationMs}ms)`, event.data.success ? 'fas fa-check-circle' : 'fas fa-times-circle', event.data.success ? 'text-green-500' : 'text-red-500');
-      showToolResult(contentDiv, event.data);
-      break;
-    case 'approval':
-      addTraceItem(tracePanel, `<span class="text-orange-600 font-semibold">Approval Required:</span> ${event.data.toolName}`, 'fas fa-shield-alt', 'text-orange-500');
-      showApprovalCard(contentDiv, event.data);
-      break;
-    case 'error':
-      addTraceItem(tracePanel, event.data.message, 'fas fa-exclamation-triangle', 'text-red-500');
-      contentDiv.innerHTML += `<div class="mt-2 p-3 bg-red-50 border border-red-200 rounded-lg text-sm text-red-600"><i class="fas fa-exclamation-triangle mr-1"></i>${event.data.message}</div>`;
-      break;
-    case 'done':
-      removeThinking(contentDiv);
-      if (event.data.usage) { totalTokens += event.data.usage.totalTokens || 0; totalCost += event.data.usage.totalCostUSD || 0; updateTokenCounter(); }
-      addTraceItem(tracePanel, `Completed in ${((event.data.usage?.totalDurationMs || 0) / 1000).toFixed(1)}s`, 'fas fa-flag-checkered', 'text-green-500');
-      break;
-  }
-  document.getElementById('chatMessages').scrollTop = document.getElementById('chatMessages').scrollHeight;
-  tracePanel.scrollTop = tracePanel.scrollHeight;
-}
-
-// ============================================================
-// APPROVAL CARD
-// ============================================================
-function showApprovalCard(div, data) {
-  const approvalId = data.id;
-  const toolName = data.toolName || 'Unknown Tool';
-  const toolArgs = data.toolArgs || {};
-  const riskLevel = data.riskLevel || 'medium';
-  const description = data.description || '';
-  const riskColors = { low: { bg: 'bg-blue-50', border: 'border-blue-200', badge: 'bg-blue-100 text-blue-700' }, medium: { bg: 'bg-yellow-50', border: 'border-yellow-200', badge: 'bg-yellow-100 text-yellow-700' }, high: { bg: 'bg-orange-50', border: 'border-orange-200', badge: 'bg-orange-100 text-orange-700' }, critical: { bg: 'bg-red-50', border: 'border-red-200', badge: 'bg-red-100 text-red-700' } };
-  const rc = riskColors[riskLevel] || riskColors.medium;
-  const argsEntries = Object.entries(toolArgs);
-  const argsHtml = argsEntries.length > 0 ? `<div class="mt-2 bg-white bg-opacity-60 rounded p-2 font-mono text-xs space-y-0.5">${argsEntries.map(([k, v]) => { const val = typeof v === 'string' ? v : JSON.stringify(v); const truncated = val.length > 120 ? val.substring(0, 120) + '...' : val; return `<div><span class="text-gray-400">${escapeHtml(k)}:</span> <span class="text-gray-700">${escapeHtml(truncated)}</span></div>`; }).join('')}</div>` : '';
-  const cardId = `approval-${approvalId}`;
-  div.innerHTML += `<div id="${cardId}" class="mt-3 ${rc.bg} ${rc.border} border rounded-lg overflow-hidden" data-approval-id="${approvalId}"><div class="px-3 py-2 flex items-center justify-between border-b ${rc.border}"><div class="flex items-center gap-2"><i class="fas fa-shield-alt"></i><span class="font-semibold text-sm text-gray-800">Approval Required</span><span class="px-1.5 py-0.5 rounded text-xs font-medium ${rc.badge}">${riskLevel.toUpperCase()}</span></div><span id="${cardId}-timer" class="text-xs text-gray-400">60s</span></div><div class="px-3 py-2"><div class="text-sm text-gray-700"><span class="font-semibold text-indigo-600">${escapeHtml(toolName)}</span>${description ? ` — ${escapeHtml(description)}` : ''}</div>${argsHtml}</div><div id="${cardId}-actions" class="px-3 py-2 border-t ${rc.border} flex items-center gap-2"><button onclick="handleApproval('${approvalId}', true)" class="px-3 py-1.5 bg-green-500 hover:bg-green-600 text-white rounded-lg text-xs font-medium transition"><i class="fas fa-check mr-1"></i>Approve</button><button onclick="handleApproval('${approvalId}', false)" class="px-3 py-1.5 bg-red-500 hover:bg-red-600 text-white rounded-lg text-xs font-medium transition"><i class="fas fa-times mr-1"></i>Reject</button></div></div>`;
-  let remaining = 60;
-  const timerEl = document.getElementById(`${cardId}-timer`);
-  const countdown = setInterval(() => { remaining--; if (timerEl) timerEl.textContent = `${remaining}s`; if (remaining <= 0) { clearInterval(countdown); resolveApprovalCard(approvalId, true, 'timeout'); } }, 1000);
-  const card = document.getElementById(cardId); if (card) card._countdownInterval = countdown;
-  document.getElementById('chatMessages').scrollTop = document.getElementById('chatMessages').scrollHeight;
-}
-
-function handleApproval(approvalId, approved) { sendWSMessage('approval_response', { approvalId, approved }); resolveApprovalCard(approvalId, approved, 'user'); }
-
-function resolveApprovalCard(approvalId, approved, source) {
-  const cardId = `approval-${approvalId}`; const card = document.getElementById(cardId); if (!card) return;
-  if (card._countdownInterval) clearInterval(card._countdownInterval);
-  const actionsEl = document.getElementById(`${cardId}-actions`);
-  if (actionsEl) { actionsEl.innerHTML = approved ? '<div class="flex items-center gap-2 text-green-600 text-xs font-medium"><i class="fas fa-check-circle"></i> Approved</div>' : '<div class="flex items-center gap-2 text-red-600 text-xs font-medium"><i class="fas fa-times-circle"></i> Rejected</div>'; }
-}
-
-// ============================================================
-// CHAT UI HELPERS
-// ============================================================
-function addWelcomeMessage() {
-  document.getElementById('chatMessages').innerHTML = `
-    <div class="max-w-2xl mx-auto"><div class="text-center py-16">
-      <div class="w-16 h-16 bg-indigo-50 rounded-2xl flex items-center justify-center mx-auto mb-4"><i class="fas fa-robot text-indigo-500 text-2xl"></i></div>
-      <h2 class="text-xl font-bold text-gray-800 mb-2">Admin Console</h2>
-      <p class="text-gray-500 text-sm max-w-md mx-auto mb-8">Write code, search knowledge base, manage files, deploy — all in natural language.</p>
-      <div class="flex flex-wrap justify-center gap-2">
-        <button onclick="sendQuickAction('Show me the system status and available tools')" class="px-3 py-1.5 bg-gray-50 hover:bg-gray-100 rounded-lg text-xs text-gray-600 transition border border-gray-200"><i class="fas fa-heartbeat mr-1 text-green-500"></i>System Status</button>
-        <button onclick="sendQuickAction('Create a new Hono web app with a REST API and Tailwind frontend')" class="px-3 py-1.5 bg-gray-50 hover:bg-gray-100 rounded-lg text-xs text-gray-600 transition border border-gray-200"><i class="fas fa-code mr-1 text-blue-500"></i>Create Web App</button>
-        <button onclick="sendQuickAction('Search the web for the latest Hono framework features')" class="px-3 py-1.5 bg-gray-50 hover:bg-gray-100 rounded-lg text-xs text-gray-600 transition border border-gray-200"><i class="fas fa-search mr-1 text-yellow-500"></i>Web Search</button>
-      </div>
-    </div></div>`;
-}
-
-function addChatMessage(role, content, placeholder = false) {
-  const chatDiv = document.getElementById('chatMessages');
-  const div = document.createElement('div');
-  div.className = 'max-w-2xl mx-auto message-enter';
-  const isUser = role === 'user';
-  div.innerHTML = `
-    <div class="flex gap-3 ${isUser ? 'flex-row-reverse' : ''}">
-      <div class="w-7 h-7 rounded-lg flex items-center justify-center shrink-0 ${isUser ? 'bg-indigo-600' : 'bg-gray-100'}">
-        <i class="fas ${isUser ? 'fa-user' : 'fa-robot'} text-xs ${isUser ? 'text-white' : 'text-indigo-500'}"></i>
-      </div>
-      <div class="flex-1 ${isUser ? 'text-right' : ''} min-w-0">
-        <div class="message-content inline-block text-left rounded-2xl px-4 py-3 text-sm leading-relaxed
-          ${isUser ? 'bg-indigo-600 text-white rounded-tr-sm max-w-[85%]' : 'bg-gray-50 text-gray-800 rounded-tl-sm w-full border border-gray-200'}">
-          ${placeholder ? '<div class="thinking-indicator"><span class="thinking-dot inline-block w-1.5 h-1.5 bg-indigo-400 rounded-full mx-0.5"></span><span class="thinking-dot inline-block w-1.5 h-1.5 bg-indigo-400 rounded-full mx-0.5" style="animation-delay:0.2s"></span><span class="thinking-dot inline-block w-1.5 h-1.5 bg-indigo-400 rounded-full mx-0.5" style="animation-delay:0.4s"></span></div>' : (isUser ? escapeHtml(content) : renderMarkdown(content))}
+  // Billing history
+  const container = document.getElementById('billingHistory');
+  if (container) {
+    const history = [
+      { date: '2026-03-25', desc: 'OpenAI — GPT-4o (1,247 requests)', amount: '$24.80' },
+      { date: '2026-03-24', desc: 'Anthropic — Claude 3.5 Sonnet (342 requests)', amount: '$18.40' },
+      { date: '2026-03-24', desc: 'Google — Gemini 2.0 Flash (890 requests)', amount: '$3.20' },
+      { date: '2026-03-23', desc: 'Groq — Llama 3.1 70B (1,840 requests)', amount: '$2.10' },
+      { date: '2026-03-23', desc: 'OpenAI — Embeddings (12,400 chunks)', amount: '$0.25' },
+      { date: '2026-03-22', desc: 'OpenAI — GPT-4o (980 requests)', amount: '$19.60' },
+    ];
+    container.innerHTML = history.map(h => `
+      <div class="flex items-center justify-between py-2.5 border-b border-gray-50 last:border-0">
+        <div>
+          <div class="text-sm text-gray-700">${h.desc}</div>
+          <div class="text-[10px] text-gray-400">${h.date}</div>
         </div>
+        <div class="text-sm font-semibold text-gray-800">${h.amount}</div>
       </div>
-    </div>`;
-  chatDiv.appendChild(div);
-  chatDiv.scrollTop = chatDiv.scrollHeight;
-  return div;
-}
-
-function showThinking(div, text) { const el = div.querySelector('.thinking-indicator'); if (el) el.innerHTML = `<span class="text-gray-400 text-xs"><i class="fas fa-brain mr-1 text-purple-500"></i>${escapeHtml(text)}</span>`; }
-function removeThinking(div) { const el = div.querySelector('.thinking-indicator'); if (el) el.remove(); }
-
-let _streamRenderTimer = null;
-function appendStreamedText(div, delta, fullText) {
-  removeThinking(div);
-  let el = div.querySelector('.streamed-text');
-  if (!el) { const existingTools = div.querySelectorAll('.tool-execution'); div.innerHTML = ''; existingTools.forEach(t => div.appendChild(t)); el = document.createElement('div'); el.className = 'streamed-text prose prose-sm max-w-none'; div.appendChild(el); }
-  if (_streamRenderTimer) clearTimeout(_streamRenderTimer);
-  _streamRenderTimer = setTimeout(() => { if (el && fullText) { try { el.innerHTML = renderMarkdown(fullText); } catch { el.textContent = fullText; } } _streamRenderTimer = null; }, 300);
-  if (!_streamRenderTimer) el.textContent = fullText;
-}
-
-function showToolCall(div, toolName, args) {
-  div.innerHTML += `<div class="tool-execution mt-2 p-2 bg-gray-50 rounded-lg border border-gray-200 text-xs"><div class="flex items-center gap-2 text-yellow-600"><i class="fas fa-wrench" style="font-size:10px"></i><span class="font-semibold">${toolName}</span><div class="flex-1"></div><div class="thinking-dot inline-block w-1.5 h-1.5 bg-yellow-500 rounded-full"></div></div><div class="mt-1 text-gray-400 font-mono text-[11px] truncate">${truncateArgs(args)}</div></div>`;
-}
-
-function showToolResult(div, data) {
-  const lastTool = div.querySelector('.tool-execution:last-child'); if (!lastTool) return;
-  const dot = lastTool.querySelector('.thinking-dot');
-  if (dot) { dot.className = `inline-block w-1.5 h-1.5 rounded-full ${data.success ? 'bg-green-500' : 'bg-red-500'}`; dot.style.animation = 'none'; }
-  if (data.output && typeof data.output === 'object') lastTool.innerHTML += `<pre class="mt-1 text-gray-500 overflow-x-auto max-h-24 overflow-y-auto text-[11px]"><code>${escapeHtml(JSON.stringify(data.output, null, 2).substring(0, 300))}</code></pre>`;
+    `).join('');
+  }
 }
 
 // ============================================================
-// TRACE PANEL
+// LOGS
 // ============================================================
-function addTraceItem(panel, content, icon, color) {
-  const time = new Date().toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' });
-  const div = document.createElement('div');
-  div.className = 'flex gap-2 text-xs message-enter';
-  div.innerHTML = `<span class="text-gray-400 shrink-0 w-14 font-mono">${time}</span><i class="${icon} ${color} shrink-0 mt-0.5" style="font-size:10px"></i><span class="text-gray-600 break-words min-w-0">${content}</span>`;
-  panel.appendChild(div);
-}
+async function loadLogs() {
+  const res = await fetch('/api/admin/logs');
+  const json = await res.json();
+  if (!json.success) return;
 
-// ============================================================
-// FILE TREE
-// ============================================================
-async function loadWorkspaces() {
-  try {
-    const res = await fetch('/api/workspace');
-    const data = await res.json();
-    if (data.success) {
-      const opts = data.data.workspaces.length > 0 ? data.data.workspaces.map(w => `<option value="${w.id}" ${w.id === currentWorkspace ? 'selected' : ''}>${w.name}</option>`).join('') : '<option value="default">default</option>';
-      ['workspaceSelect', 'workspaceSelectSide'].forEach(id => { const el = document.getElementById(id); if (el) el.innerHTML = opts; });
-    }
-  } catch {}
-}
+  const container = document.getElementById('logEntries');
+  if (!container) return;
 
-async function loadWorkspace(id) { currentWorkspace = id; refreshFileTree(); }
+  const levelFilter = document.getElementById('logLevelFilter')?.value || 'all';
+  const logs = levelFilter === 'all' ? json.data.logs : json.data.logs.filter(l => l.level === levelFilter);
 
-async function refreshFileTree() {
-  try {
-    const res = await fetch(`/api/workspace/${currentWorkspace}/tree`);
-    const data = await res.json();
-    if (data.success) { const html = renderFileTreeHTML(data.data.tree); const el = document.getElementById('fileTree'); if (el) el.innerHTML = html; }
-  } catch { const el = document.getElementById('fileTree'); if (el) el.innerHTML = '<div class="text-gray-400 text-xs px-2">Could not load files</div>'; }
-}
+  container.innerHTML = logs.map(log => {
+    const levelColors = {
+      info: 'text-blue-400',
+      warn: 'text-yellow-500',
+      error: 'text-red-500',
+    };
+    const time = new Date(log.timestamp).toLocaleTimeString();
+    const color = levelColors[log.level] || 'text-gray-400';
 
-async function refreshSideFileTree() {
-  try {
-    const res = await fetch(`/api/workspace/${currentWorkspace}/tree`);
-    const data = await res.json();
-    if (data.success) { const el = document.getElementById('fileTreeSide'); if (el) el.innerHTML = renderFileTreeHTML(data.data.tree); }
-  } catch { const el = document.getElementById('fileTreeSide'); if (el) el.innerHTML = '<div class="text-gray-400 text-xs px-2">Could not load files</div>'; }
-}
-
-function renderFileTreeHTML(nodes, depth = 0) {
-  if (!nodes || !nodes.length) return '<div class="text-gray-400 text-xs px-2">Empty</div>';
-  return nodes.map(node => {
-    const indent = depth * 14;
-    const icon = node.type === 'directory' ? 'fas fa-folder text-yellow-500' : getFileIcon(node.name);
-    if (node.type === 'directory') {
-      return `<div><div class="file-tree-item flex items-center gap-1.5" style="padding-left:${indent+8}px" onclick="this.nextElementSibling.classList.toggle('hidden');this.querySelector('.fa-folder').classList.toggle('fa-folder-open')"><i class="${icon} text-xs"></i><span class="text-xs truncate">${node.name}</span></div><div>${renderFileTreeHTML(node.children||[], depth+1)}</div></div>`;
-    }
-    return `<div class="file-tree-item flex items-center gap-1.5" style="padding-left:${indent+8}px" onclick="openFile('${node.path}')" title="${node.name} (${formatSize(node.size)})"><i class="${icon} text-xs"></i><span class="text-xs truncate">${node.name}</span></div>`;
+    return `
+      <div class="flex items-start gap-2 py-1.5 border-b border-gray-50 hover:bg-gray-50 px-2 -mx-2 rounded">
+        <span class="text-gray-400 shrink-0 w-16">${time}</span>
+        <span class="${color} shrink-0 w-12 uppercase font-semibold">${log.level}</span>
+        <span class="text-gray-400 shrink-0 w-16">[${log.source}]</span>
+        <span class="text-gray-600">${log.message}</span>
+      </div>
+    `;
   }).join('');
 }
 
-function getFileIcon(name) {
-  const ext = name.split('.').pop()?.toLowerCase();
-  return { ts:'fab fa-js text-blue-500', tsx:'fab fa-react text-cyan-500', js:'fab fa-js text-yellow-500', jsx:'fab fa-react text-cyan-500', py:'fab fa-python text-green-500', html:'fab fa-html5 text-orange-500', css:'fab fa-css3 text-blue-500', json:'fas fa-brackets-curly text-yellow-600', md:'fab fa-markdown text-gray-500', sql:'fas fa-database text-blue-400', sh:'fas fa-terminal text-green-400' }[ext] || 'fas fa-file text-gray-400';
-}
-
-function openFile(path) { sendQuickAction(`Read the file at ${path} and show me its contents`); }
-
-async function createWorkspace() {
-  const name = prompt('Workspace name:');
-  if (!name) return;
-  try { await fetch('/api/workspace', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name }) }); loadWorkspaces(); } catch {}
-}
-
-// ============================================================
-// RAG
-// ============================================================
-async function loadRAGDocs() {
-  try {
-    const res = await fetch('/api/rag/documents');
-    const data = await res.json();
-    if (data.success) { const el = document.getElementById('ragDocCountSide'); if (el) el.textContent = `${data.data.count} documents indexed`; }
-  } catch {}
-}
-function showRAGPanel() { document.getElementById('ragModal').style.display = 'flex'; loadRAGDocList(); }
-function hideRAGPanel() { document.getElementById('ragModal').style.display = 'none'; }
-
-async function loadRAGDocList() {
-  try {
-    const res = await fetch('/api/rag/documents');
-    const data = await res.json();
-    if (data.success && data.data.documents.length > 0) {
-      document.getElementById('ragDocList').innerHTML = data.data.documents.map(d => `
-        <div class="flex items-center justify-between p-3 bg-gray-50 rounded-lg border border-gray-200">
-          <div><div class="text-sm font-medium text-gray-700">${d.title}</div><div class="text-xs text-gray-400">${d.sourceType} | ${d.chunkCount} chunks | ${new Date(d.createdAt).toLocaleDateString()}</div></div>
-          <button onclick="deleteRAGDoc('${d.id}')" class="text-red-400 hover:text-red-500 text-xs"><i class="fas fa-trash"></i></button>
-        </div>`).join('');
-    }
-  } catch {}
-}
-
-async function ingestDocument() {
-  const title = document.getElementById('ragTitle').value, content = document.getElementById('ragContent').value, sourceType = document.getElementById('ragType').value;
-  if (!title || !content) return alert('Title and content required');
-  try {
-    const res = await fetch('/api/rag/ingest', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ title, content, sourceType }) });
-    const data = await res.json();
-    if (data.success) { document.getElementById('ragTitle').value = ''; document.getElementById('ragContent').value = ''; loadRAGDocList(); loadRAGDocs(); alert(`Ingested: ${data.data.chunkCount} chunks`); }
-  } catch (e) { alert('Ingest failed: ' + e.message); }
-}
-
-async function deleteRAGDoc(id) {
-  if (!confirm('Delete this document?')) return;
-  try { await fetch(`/api/rag/documents/${id}`, { method: 'DELETE' }); loadRAGDocList(); loadRAGDocs(); } catch {}
-}
-
-// ============================================================
-// TERMINAL
-// ============================================================
-var _termHistory = [];
-var _termHistoryIdx = -1;
-
-async function executeTerminalCmd() {
-  var input = document.getElementById('terminalInput');
-  var cmd = input.value.trim();
-  if (!cmd) return;
-  _termHistory.unshift(cmd); if (_termHistory.length > 50) _termHistory.pop(); _termHistoryIdx = -1;
-  input.value = '';
-  var output = document.getElementById('terminalOutput');
-  output.innerHTML += '<div class="text-green-400">$ ' + escapeHtml(cmd) + '</div>';
-  output.innerHTML += '<div class="text-gray-500 term-loading"><i class="fas fa-spinner fa-spin"></i> Running...</div>';
-  output.scrollTop = output.scrollHeight;
-  try {
-    var resp = await fetch('/api/system/terminal/exec', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ command: cmd, workspaceId: currentWorkspace || 'default' }) });
-    var data = await resp.json();
-    var loading = output.querySelector('.term-loading'); if (loading) loading.remove();
-    if (data.success && data.data) {
-      if (data.data.output) output.innerHTML += '<div class="text-gray-300 whitespace-pre-wrap">' + escapeHtml(data.data.output) + '</div>';
-      if (data.data.stderr) output.innerHTML += '<div class="text-red-400 whitespace-pre-wrap">' + escapeHtml(data.data.stderr) + '</div>';
-      if (data.data.exitCode !== 0) output.innerHTML += '<div class="text-red-400">Exit code: ' + data.data.exitCode + '</div>';
-    } else output.innerHTML += '<div class="text-red-400">Error: ' + (data.error ? data.error.message : 'Unknown error') + '</div>';
-  } catch (err) { var loading2 = output.querySelector('.term-loading'); if (loading2) loading2.remove(); output.innerHTML += '<div class="text-red-400">Error: ' + err.message + '</div>'; }
-  output.scrollTop = output.scrollHeight;
-}
-
-function clearTerminal() { document.getElementById('terminalOutput').innerHTML = '<div class="text-gray-500">Terminal cleared.</div>'; }
-
-document.addEventListener('keydown', function(e) {
-  var input = document.getElementById('terminalInput');
-  if (document.activeElement !== input) return;
-  if (e.key === 'ArrowUp') { e.preventDefault(); _termHistoryIdx = Math.min(_termHistoryIdx + 1, _termHistory.length - 1); if (_termHistory[_termHistoryIdx]) input.value = _termHistory[_termHistoryIdx]; }
-  else if (e.key === 'ArrowDown') { e.preventDefault(); _termHistoryIdx = Math.max(_termHistoryIdx - 1, -1); input.value = _termHistoryIdx >= 0 ? _termHistory[_termHistoryIdx] : ''; }
+// Add log filter listener
+document.addEventListener('DOMContentLoaded', () => {
+  const filter = document.getElementById('logLevelFilter');
+  if (filter) filter.addEventListener('change', () => { if (currentSection === 'logs') loadLogs(); });
 });
-
-// ============================================================
-// DEPLOY STATUS
-// ============================================================
-async function loadDeployStatus() {
-  try {
-    var resp = await fetch('/api/system/deploy/status'); var data = await resp.json(); if (!data.success) return;
-    var histEl = document.getElementById('deployHistory'); if (!histEl) return;
-    var deps = data.data.deployments || [];
-    if (deps.length === 0) { histEl.innerHTML = '<div class="text-xs text-gray-400 text-center py-4"><i class="fas fa-rocket text-gray-300 text-2xl mb-2 block"></i>No deployments yet.</div>'; return; }
-    histEl.innerHTML = deps.map(d => { var statusColors = { deployed: 'bg-green-500', building: 'bg-yellow-500', pending: 'bg-blue-500', failed: 'bg-red-500' }; var dot = statusColors[d.status] || 'bg-gray-400'; var time = new Date(d.timestamp).toLocaleString(); return '<div class="flex items-center gap-2 p-2 bg-gray-50 rounded-lg border border-gray-100"><div class="w-2 h-2 rounded-full ' + dot + ' shrink-0"></div><div class="flex-1 min-w-0"><div class="text-xs font-medium text-gray-700">' + (d.platform || 'unknown') + '</div><div class="text-[10px] text-gray-400">' + time + '</div></div><span class="text-[10px] px-1.5 py-0.5 rounded-full bg-gray-100 text-gray-500">' + d.status + '</span></div>'; }).join('');
-  } catch { var histEl2 = document.getElementById('deployHistory'); if (histEl2) histEl2.innerHTML = '<div class="text-xs text-gray-400 text-center py-2">Could not load deploy status</div>'; }
-}
-
-// ============================================================
-// GIT STATUS
-// ============================================================
-async function loadGitStatus() {
-  try {
-    var resp = await fetch('/api/system/git/status?workspaceId=' + encodeURIComponent(currentWorkspace || 'default'));
-    var data = await resp.json(); if (!data.success) return;
-    var d = data.data;
-    var dotEl = document.getElementById('gitStatusDot'); if (dotEl) dotEl.className = 'w-2 h-2 rounded-full ' + (d.isGitRepo ? (d.isClean ? 'bg-green-500' : 'bg-yellow-500') : 'bg-gray-300');
-    var branchEl = document.getElementById('gitBranchName'); if (branchEl) branchEl.textContent = d.isGitRepo ? (d.branch || 'detached') : 'Not a git repo';
-    var cleanEl = document.getElementById('gitCleanBadge'); if (cleanEl) { if (d.isGitRepo) { cleanEl.textContent = d.isClean ? 'Clean' : d.changedFileCount + ' changed'; cleanEl.className = 'text-[10px] px-1.5 py-0.5 rounded-full ' + (d.isClean ? 'bg-green-50 text-green-600' : 'bg-yellow-50 text-yellow-600'); } else { cleanEl.textContent = 'No git'; cleanEl.className = 'text-[10px] px-1.5 py-0.5 rounded-full bg-gray-100 text-gray-500'; } }
-    var remoteEl = document.getElementById('gitRemoteUrl'); if (remoteEl) remoteEl.textContent = d.remoteUrl || 'No remote configured';
-    var changedEl = document.getElementById('gitChangedFiles'); if (changedEl) { if (d.changes && d.changes.length > 0) { changedEl.innerHTML = d.changes.slice(0, 8).map(ch => { var statusColors = { M: 'text-yellow-500', A: 'text-green-500', D: 'text-red-500', '??': 'text-blue-500' }; var color = statusColors[ch.status] || 'text-gray-400'; return '<div class="flex items-center gap-1"><span class="font-mono ' + color + ' w-4">' + ch.status + '</span><span class="text-gray-600 truncate">' + ch.file + '</span></div>'; }).join(''); } else changedEl.innerHTML = ''; }
-    var histEl = document.getElementById('gitCommitHistory'); if (histEl) { if (d.commits && d.commits.length > 0) { histEl.innerHTML = d.commits.map(c => '<div class="flex items-center gap-2 py-1 border-b border-gray-50 last:border-0"><span class="text-[10px] font-mono text-indigo-500 shrink-0">' + c.hash + '</span><span class="text-xs text-gray-600 truncate">' + escapeHtml(c.message) + '</span></div>').join(''); } else histEl.innerHTML = '<div class="text-xs text-gray-400 text-center py-2">No commits</div>'; }
-  } catch { var histEl2 = document.getElementById('gitCommitHistory'); if (histEl2) histEl2.innerHTML = '<div class="text-xs text-red-400 text-center py-2">Failed to load git status</div>'; }
-}
 
 // ============================================================
 // SETTINGS
 // ============================================================
-function showSettings() { document.getElementById('settingsModal').style.display = 'flex'; loadSystemInfo(); }
-function hideSettings() { document.getElementById('settingsModal').style.display = 'none'; }
+async function loadSettings() {
+  const res = await fetch('/api/admin/settings');
+  const json = await res.json();
+  if (!json.success) return;
 
-async function loadSystemInfo() {
+  const { featureFlags } = json.data;
+
+  const container = document.getElementById('featureFlags');
+  if (!container) return;
+
+  const flags = [
+    { key: 'ragEnabled',           label: 'RAG / Knowledge Base',   desc: 'Enable document ingestion and retrieval-augmented generation' },
+    { key: 'sandboxEnabled',       label: 'Docker Sandbox',         desc: 'Enable isolated code execution in Docker containers' },
+    { key: 'memoryEnabled',        label: 'Project Memory',         desc: 'Enable persistent project memory and context tracking' },
+    { key: 'workflowsEnabled',     label: 'Workflows',              desc: 'Enable multi-step automated workflows' },
+    { key: 'multiAgentEnabled',    label: 'Multi-Agent Orchestration', desc: 'Enable parallel agent execution with MoE routing' },
+    { key: 'codeExecutionEnabled', label: 'Code Execution',         desc: 'Allow agents to execute code via tools' },
+    { key: 'deploymentEnabled',    label: 'Deployment',             desc: 'Enable deployment to Cloudflare/Vercel via API' },
+    { key: 'gitEnabled',           label: 'Git Integration',        desc: 'Enable GitHub operations (push, PR, etc.)' },
+  ];
+
+  container.innerHTML = flags.map(f => {
+    const enabled = featureFlags[f.key] ?? false;
+    return `
+      <div class="flex items-center justify-between">
+        <div>
+          <div class="text-sm text-gray-700">${f.label}</div>
+          <div class="text-xs text-gray-400">${f.desc}</div>
+        </div>
+        <div class="toggle-switch ${enabled ? 'active' : ''}" onclick="this.classList.toggle('active')"></div>
+      </div>
+    `;
+  }).join('');
+}
+
+// ============================================================
+// SECURITY
+// ============================================================
+async function loadSecurity() {
+  // Security section is mostly static HTML with toggles.
+  // We can populate from the API if needed.
   try {
-    const res = await fetch('/api/system/status');
-    const data = await res.json();
-    if (data.success) {
-      const d = data.data, ws = d.websocket || {}, costs = d.costs || {};
-      document.getElementById('systemInfo').innerHTML = `
-        <div class="space-y-1.5">
-          <div>Status: <span class="text-green-600 font-semibold">${d.status}</span></div>
-          <div>Version: <span class="text-indigo-600">${d.version || '1.9.0'}</span></div>
-          <div>Database: <span class="${d.database==='connected'?'text-green-600':'text-red-500'}">${d.database}</span></div>
-          <div>Redis: <span class="${(d.redis||'')=='connected'?'text-green-600':'text-red-500'}">${d.redis||'unknown'}</span></div>
-          <div>ChromaDB: <span class="${(d.chromadb||'')=='connected'?'text-green-600':'text-red-500'}">${d.chromadb||'unknown'}</span></div>
-          <div>LLM Providers: <span class="text-indigo-600">${d.llmProviders.join(', ')}</span></div>
-          <div>Tools: <span class="text-indigo-600">${d.toolCount}</span></div>
-          <div>Memory: ${d.memory.used} / ${d.memory.total}</div>
-          <div>WebSocket Clients: <span class="text-indigo-600">${ws.connectedClients || 0}</span></div>
-          <div>Session Cost: <span class="text-yellow-600">$${(costs.sessionTotal||0).toFixed(6)}</span></div>
-          <div>Uptime: ${Math.floor(d.uptime / 60)} min</div>
-        </div>`;
-    }
-  } catch { document.getElementById('systemInfo').innerHTML = '<div class="text-red-500">Could not load</div>'; }
+    const res = await fetch('/api/admin/security');
+    const json = await res.json();
+    // Could populate toggles dynamically here.
+  } catch {}
 }
 
 // ============================================================
-// UTILITIES
+// CHART HELPERS — Destroy-and-recreate pattern for Chart.js
 // ============================================================
-function escapeHtml(t) { const d = document.createElement('div'); d.textContent = t; return d.innerHTML; }
-function agentBadgeColor(agent) {
-  const colors = { code: 'bg-blue-100 text-blue-700', design: 'bg-pink-100 text-pink-700', test: 'bg-green-100 text-green-700', reviewer: 'bg-orange-100 text-orange-700', deploy: 'bg-purple-100 text-purple-700', rag: 'bg-yellow-100 text-yellow-700', router: 'bg-gray-100 text-gray-700' };
-  return colors[agent] || colors.router;
+function renderLineChart(canvasId, data) {
+  const canvas = document.getElementById(canvasId);
+  if (!canvas) return;
+  if (chartsInitialized[canvasId]) chartsInitialized[canvasId].destroy();
+
+  chartsInitialized[canvasId] = new Chart(canvas, {
+    type: 'line',
+    data: data,
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: { legend: { display: false } },
+      scales: {
+        x: { grid: { display: false }, ticks: { font: { size: 11 }, color: '#94a3b8' } },
+        y: { grid: { color: '#f1f5f9' }, ticks: { font: { size: 11 }, color: '#94a3b8' } },
+      },
+    },
+  });
 }
-function renderMarkdown(t) { if (!t) return ''; try { return marked.parse(t); } catch { return escapeHtml(t); } }
-function truncateArgs(a) { const s = typeof a === 'string' ? a : JSON.stringify(a); return s.length > 80 ? s.substring(0,80)+'...' : s; }
-function formatSize(b) { if (!b) return '0 B'; if (b < 1024) return b+' B'; if (b < 1048576) return (b/1024).toFixed(1)+' KB'; return (b/1048576).toFixed(1)+' MB'; }
-function autoResize(el) { el.style.height = 'auto'; el.style.height = Math.min(el.scrollHeight, 128) + 'px'; }
-function handleInputKeydown(e) { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(); } }
-function updateSendButton(s) {
-  const b = document.getElementById('sendBtn');
-  if (b) { b.innerHTML = s ? '<i class="fas fa-spinner fa-spin text-white text-xs"></i>' : '<i class="fas fa-arrow-up text-white text-xs"></i>'; b.disabled = s; }
+
+function renderDoughnutChart(canvasId, data) {
+  const canvas = document.getElementById(canvasId);
+  if (!canvas) return;
+  if (chartsInitialized[canvasId]) chartsInitialized[canvasId].destroy();
+
+  chartsInitialized[canvasId] = new Chart(canvas, {
+    type: 'doughnut',
+    data: data,
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      cutout: '65%',
+      plugins: {
+        legend: { position: 'bottom', labels: { font: { size: 11 }, padding: 15, usePointStyle: true, pointStyleWidth: 8 } },
+      },
+    },
+  });
 }
-function updateTokenCounter() {
-  const text = `Tokens: ${totalTokens.toLocaleString()} | Cost: $${totalCost.toFixed(4)}`;
-  const el1 = document.getElementById('tokenCounter'); if (el1) el1.textContent = text;
+
+function renderBarChart(canvasId, data) {
+  const canvas = document.getElementById(canvasId);
+  if (!canvas) return;
+  if (chartsInitialized[canvasId]) chartsInitialized[canvasId].destroy();
+
+  chartsInitialized[canvasId] = new Chart(canvas, {
+    type: 'bar',
+    data: data,
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: { legend: { display: false } },
+      scales: {
+        x: { grid: { display: false }, ticks: { font: { size: 11 }, color: '#94a3b8' } },
+        y: { grid: { color: '#f1f5f9' }, ticks: { font: { size: 11 }, color: '#94a3b8' } },
+      },
+    },
+  });
 }
-function copyCode(btn) { const code = btn.closest('.mt-3').querySelector('code').textContent; navigator.clipboard.writeText(code); btn.innerHTML = '<i class="fas fa-check text-green-500"></i>'; setTimeout(() => btn.innerHTML = '<i class="fas fa-copy"></i>', 2000); }
+
+function renderDualAxisChart(canvasId, data) {
+  const canvas = document.getElementById(canvasId);
+  if (!canvas) return;
+  if (chartsInitialized[canvasId]) chartsInitialized[canvasId].destroy();
+
+  chartsInitialized[canvasId] = new Chart(canvas, {
+    type: 'bar',
+    data: {
+      labels: data.labels,
+      datasets: [
+        {
+          type: 'bar',
+          label: 'Requests',
+          data: data.volume,
+          backgroundColor: 'rgba(99,102,241,0.6)',
+          borderRadius: 4,
+          yAxisID: 'y',
+        },
+        {
+          type: 'line',
+          label: 'Avg Latency (s)',
+          data: data.latency,
+          borderColor: '#f97316',
+          backgroundColor: 'rgba(249,115,22,0.1)',
+          fill: false,
+          tension: 0.4,
+          pointRadius: 4,
+          borderWidth: 2,
+          yAxisID: 'y1',
+        },
+      ],
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      interaction: { mode: 'index', intersect: false },
+      plugins: { legend: { position: 'top', labels: { font: { size: 11 }, usePointStyle: true, padding: 20 } } },
+      scales: {
+        x: { grid: { display: false }, ticks: { font: { size: 11 }, color: '#94a3b8' } },
+        y: {
+          type: 'linear', position: 'left',
+          grid: { color: '#f1f5f9' },
+          ticks: { font: { size: 11 }, color: '#94a3b8' },
+          title: { display: true, text: 'Requests', font: { size: 11 }, color: '#94a3b8' },
+        },
+        y1: {
+          type: 'linear', position: 'right',
+          grid: { drawOnChartArea: false },
+          ticks: { font: { size: 11 }, color: '#f97316' },
+          title: { display: true, text: 'Latency (s)', font: { size: 11 }, color: '#f97316' },
+        },
+      },
+    },
+  });
+}
+
+// ============================================================
+// UTILITY HELPERS
+// ============================================================
+function setText(id, text) {
+  const el = document.getElementById(id);
+  if (el) el.textContent = text;
+}
+
+function timeAgo(date) {
+  const secs = Math.floor((Date.now() - date.getTime()) / 1000);
+  if (secs < 60) return 'just now';
+  if (secs < 3600) return Math.floor(secs / 60) + 'm ago';
+  if (secs < 86400) return Math.floor(secs / 3600) + 'h ago';
+  return Math.floor(secs / 86400) + 'd ago';
+}
